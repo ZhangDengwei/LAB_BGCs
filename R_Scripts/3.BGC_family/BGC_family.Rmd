@@ -1,0 +1,851 @@
+---
+title: "BGC family"
+output: html_document
+date: '2022-03-09'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# load libraries
+```{r}
+library(dplyr)
+library(stringr)
+library(openxlsx)
+library(vcd)
+library(ggplot2)
+library(ggthemes)
+library(ggsci)
+library(gg.gap)
+library(gridExtra)
+library(ggbreak)
+library(ggpubr)
+library(ggsignif)
+library(coin)
+library(factoextra)
+library(pheatmap)
+library(ggridges)
+library(scatterpie)
+library(ComplexHeatmap)
+library(RColorBrewer)
+library(ggrepel)
+```
+
+
+# set global parameters
+```{r}
+print_table <- F
+print_figure <- F
+```
+
+
+# load datasets
+```{r}
+df_bgc <- read.delim2("../02.BGC_profile/All_130051_BGCs_info.tsv")
+df_family <- read.delim2("genome_31977_clustering.tsv")
+
+df_bgc_family <- merge(df_bgc, df_family, by.x = "id", by.y = "BGC", all.x = TRUE)
+df_bgc_family$BGC_family <- paste("GCF_",df_bgc_family$cluster_0.2,sep = "")
+df_bgc_family$BGC_clan <- paste("GCC_", df_bgc_family$cluster_0.8, sep = "")
+df_bgc_family$BGC_family[df_bgc_family$BGC_family=="GCF_NA"] <- NA
+df_bgc_family$BGC_clan[df_bgc_family$BGC_clan=="GCC_NA"] <- NA
+if (print_table){
+  write.table(df_bgc_family, file = "All_130051_BGCs_family.tsv", quote = FALSE, row.names = FALSE, sep = "\t")
+}
+```
+
+
+# BGC family count
+```{r}
+df_family <- table(df_bgc_family$BGC_family) %>% as.data.frame()
+df_family <- df_family[order(df_family$Freq),]
+p <- df_family %>%
+      ggplot(aes(x=Freq)) +
+      geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8)+
+      theme_bw()
+
+if (print_figure){
+  ggsave(filename = "BGC_Counts_in_different_family.pdf",plot = p, useDingbats = FALSE, width = 5,height = 3)
+}
+
+df_family_count <- data.frame("1"=sum(df_family$Freq==1),
+                              "1-100"=sum(df_family$Freq>1 & df_family$Freq<=100),
+                              "100-1000"=sum(df_family$Freq>100 & df_family$Freq<=1000),
+                              ">1000"=sum(df_family$Freq>1000),
+                              check.names = FALSE)
+df_family_count_t <- df_family_count %>% t() %>% as.data.frame()
+names(df_family_count_t) <- "count"
+df_family_count_t$interval <- rownames(df_family_count_t)
+df_family_count_t_melt <- reshape2::melt(df_family_count_t, id="interval")
+df_family_count_t_melt_2 <- df_family_count_t_melt %>% 
+                              arrange(desc(interval)) %>%
+                              mutate(prop = value / sum(df_family_count_t_melt$value) *100) %>%
+                              mutate(ypos = cumsum(prop)- 0.5*prop )
+df_family_count_t_melt_2$label <- paste(df_family_count_t_melt_2$interval, " (", round(df_family_count_t_melt_2$prop,2),")", sep = "")
+p2 <- ggplot(df_family_count_t_melt_2, aes(x="", y=value, fill=interval)) +
+        geom_bar(stat="identity", width=1, color="white") +
+        coord_polar("y", start=0) +
+        theme_void() + 
+        theme(legend.position="none") +
+        geom_text(aes(y = ypos, label = label), color = "white", size=5) +
+        scale_fill_d3()
+if (print_figure){
+  ggsave(filename = "Proportion_of_BGC_Counts_in_different_family.pdf",plot = p2, useDingbats = FALSE, width = 3,height = 3)
+}
+```
+
+
+# BGC family count vs. genomes
+```{r}
+df_gcf_genome <- unique(df_bgc_family[!is.na(df_bgc_family$BGC_family), c("Genome","BGC_family")])
+df_gcf_genome_count <- table(df_gcf_genome$BGC_family) %>% as.data.frame()
+
+df_gcf_genome_count_bin <- data.frame("1"=sum(df_gcf_genome_count$Freq==1),
+                              "1-100"=sum(df_gcf_genome_count$Freq>1 & df_gcf_genome_count$Freq<=100),
+                              "100-1000"=sum(df_gcf_genome_count$Freq>100 & df_gcf_genome_count$Freq<=1000),
+                              ">1000"=sum(df_gcf_genome_count$Freq>1000),
+                              check.names = FALSE)
+df_gcf_genome_count_bin_t <- df_gcf_genome_count_bin %>% t() %>% as.data.frame()
+df_gcf_genome_count_bin_t$bin <- rownames(df_gcf_genome_count_bin_t)
+df_gcf_genome_count_bin_t$bin <- factor(df_gcf_genome_count_bin_t$bin, levels = c("1","1-100","100-1000",">1000"))
+
+p_gcf_genome <- ggplot(data=df_gcf_genome_count_bin_t, aes(x=bin, y=V1)) +
+            geom_bar(stat="identity")+
+            theme_base()+
+            xlab("Number of genomes")+
+            ylab("Number of GCFs")+
+            geom_text(aes(label=V1), vjust=0, size=3.5)
+
+ggsave(filename = "GCF_number_vs_genome_number.pdf",plot = p_gcf_genome, useDingbats = FALSE, width = 4,height = 4)
+
+```
+
+
+# BGC family vs. genus
+```{r}
+df_family_genus <- table(df_bgc_family$BGC_family, df_bgc_family$genus) %>% as.data.frame()
+df_family_genus_dcast <- reshape2::dcast(df_family_genus, Var1~Var2, value.var = "Freq")
+df_family_genus_dcast$genus_count_present <-  rowSums(df_family_genus_dcast[,2:ncol(df_family_genus_dcast)]>0)
+df_family_genus_dcast$total_bgc <- rowSums(df_family_genus_dcast[,2:ncol(df_family_genus_dcast)])
+
+df_family_genus_presence <- df_family_genus_dcast[,1:56]
+rownames(df_family_genus_presence) <- df_family_genus_presence$Var1
+df_family_genus_presence <- subset(df_family_genus_presence, select = -Var1)
+df_family_genus_presence[df_family_genus_presence>0] <- 1
+
+df_genus <- data.frame(genus=names(df_family_genus_presence))
+df_genus_family <- merge(df_genus, as.data.frame(distinct(df_bgc[,c("genus","family")])), by="genus", all.x = TRUE)
+ha = HeatmapAnnotation(Family = df_genus_family$family, 
+                       col = list(Family=c("f__Streptococcaceae"="#7ea0a9",
+                                          "f__Lactobacillaceae"="#d69897",
+                                          "f__Enterococcaceae"="#bcbcbc",
+                                          "f__Aerococcaceae"="#99bc82",
+                                          "f__Carnobacteriaceae"="#f4e1a1",
+                                          "f__Vagococcaceae"="#ada3cc")))
+
+df_family_genus_presence <- df_family_genus_presence[,df_genus_family$genus]
+if (print_figure){
+  pdf(file = "Heatmap_GCF_distribution.pdf",height = 8.5,width = 10.5)
+  par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+  heat_m <- Heatmap(as.matrix(df_family_genus_presence),
+          col = c("black","yellow"),
+          heatmap_legend_param = list(title="Prevalence",at=c(0,1),labels=c("Absence","Presence")),
+          column_dend_height = unit(10, "mm"),
+          #rect_gp = gpar(col = NA, lwd=0),
+          #row_names_gp = gpar(fontsize=10),
+          row_names_gp = gpar(fontsize=10),
+          border=NA,
+          show_row_names = FALSE,
+          show_column_names = TRUE,
+          cluster_columns = TRUE,
+          cluster_rows = TRUE,
+          column_names_side = "bottom",
+          use_raster = FALSE,
+          top_annotation = ha
+          )
+  dev.off()
+
+}
+
+# retrieve number of unique GCFs
+clusterlist <- ComplexHeatmap::column_order(heat_m)
+clusterlist_id <- names(df_family_genus_presence)[clusterlist]
+
+df_gcf_unique <- df_family_genus_presence[rowSums(df_family_genus_presence)==1, ]
+uniq_gcf_genus <- colSums(df_gcf_unique) %>% as.data.frame()
+names(uniq_gcf_genus) <- "uniq_gcf_no"
+uniq_gcf_genus <- uniq_gcf_genus[clusterlist_id, ,drop=FALSE]
+rownames(uniq_gcf_genus) <- clusterlist_id
+uniq_gcf_genus$genus <- rownames(uniq_gcf_genus)
+uniq_gcf_genus$genus <- factor(uniq_gcf_genus$genus, levels = clusterlist_id)
+
+p_uniq <- ggplot(data=uniq_gcf_genus, aes(x=genus, y=uniq_gcf_no)) +
+            geom_bar(stat="identity")+
+            theme_base()+
+            xlab("")+
+            ylab("Number of unique GCFs")+
+            geom_text(aes(label=uniq_gcf_no), vjust=1, size=3.5)+
+            scale_y_reverse()
+
+ggsave(filename = "Number_of_unique_GCFs.pdf",plot = p_uniq, useDingbats = FALSE, width =10,height = 3)
+
+```
+
+
+# print out for iTOL, at clan level
+```{r}
+# SAG and MAG presence
+df_bgc_family_f <- df_bgc_family[!is.na(df_bgc_family$BGC_clan),]
+df_SAG_MAG <- table(df_bgc_family_f$BGC_clan, df_bgc_family_f$genome_type) %>% as.data.frame()
+df_SAG_MAG_dcast <- reshape2::dcast(df_SAG_MAG, Var1~Var2, value.var = "Freq")
+if (print_table){
+  write.table(df_SAG_MAG_dcast, file="clans_SAG_MAG.tsv", quote = FALSE, row.names = FALSE, sep = "\t")
+}
+# MiBiG distance
+df_dist <- read.delim2("query_2_mibig_result.tsv")
+df_bgc_family_2 <- merge(df_bgc_family, df_dist, by.x = "id", by.y = "X", all.x = TRUE)
+df_bgc_family_2_f <- df_bgc_family_2[!is.na(df_bgc_family_2$BGC_clan),]
+df_bgc_family_2_f$min_value <- as.numeric(df_bgc_family_2_f$min_value)
+df_clan_dist <- aggregate(min_value ~ BGC_clan, data = df_bgc_family_2_f, mean)
+names(df_clan_dist) <- c("BGC_clan", "Average_mibig_dist")
+if (print_table){
+  write.table(df_clan_dist, file="clans_average_mibig_dist.tsv", quote = FALSE, row.names = FALSE, sep = "\t")
+}
+# BGC Class
+df_bgc_class <- table(df_bgc_family_2_f$BGC_Class_re, df_bgc_family_2_f$BGC_clan) %>% as.data.frame()
+df_bgc_class_dcast <- reshape2::dcast(df_bgc_class, Var2~Var1, value.var = "Freq")
+rownames(df_bgc_class_dcast) <- df_bgc_class_dcast$Var2
+df_bgc_class_dcast <- subset(df_bgc_class_dcast, select = -Var2)
+df_bgc_class_dcast_prop <- df_bgc_class_dcast / rowSums(df_bgc_class_dcast)
+if (print_table){
+  write.table(df_bgc_class_dcast, file="clans_BGC_Class_counts.tsv", quote = FALSE, row.names = TRUE, sep = "\t")
+  write.table(df_bgc_class_dcast_prop, file="clans_BGC_Class_Proportion.tsv", quote = FALSE, row.names = TRUE, sep = "\t")
+}
+# BGC class, showing abundant classes
+df_bgc_family_2$BGC_Class_RiPPs <- NA
+ripps_keep <- c("cyclic-lactone-autoinducer","lanthipeptide","LAP","lassopeptide","RiPP-like","RRE-containing","rSAM-Modified")
+for (i in 1:nrow(df_bgc_family_2)){
+  if (df_bgc_family_2[i,"BGC_Class_re"]=="NRPS"){df_bgc_family_2[i,"BGC_Class_RiPPs"] <- "NRPS"}
+  else if (df_bgc_family_2[i,"BGC_Class_re"]=="Terpene"){df_bgc_family_2[i,"BGC_Class_RiPPs"] <- "Terpene"}
+  else if(df_bgc_family_2[i,"BGC_Class_re"] == "T3PKS"){df_bgc_family_2[i,"BGC_Class_RiPPs"] <- "T3PKS"}
+  else if (df_bgc_family_2[i,"BGC_Class_re"]=="RiPPs"){
+    if (df_bgc_family_2[i,"RiPPs_Class"] %in% ripps_keep){
+      df_bgc_family_2[i,"BGC_Class_RiPPs"] <- df_bgc_family_2[i,"RiPPs_Class"]
+    }else{
+      df_bgc_family_2[i,"BGC_Class_RiPPs"] <- "others"
+    }
+  }else{
+    df_bgc_family_2[i,"BGC_Class_RiPPs"] <- "others"
+  }
+}
+df_bgc_family_2_f <- df_bgc_family_2[!is.na(df_bgc_family_2$BGC_clan),]
+df_bgc_class_2 <- table(df_bgc_family_2_f$BGC_Class_RiPPs, df_bgc_family_2_f$BGC_clan) %>% as.data.frame()
+df_bgc_class_2_dcast <- reshape2::dcast(df_bgc_class_2, Var2~Var1, value.var = "Freq")
+rownames(df_bgc_class_2_dcast) <- df_bgc_class_2_dcast$Var2
+df_bgc_class_2_dcast <- subset(df_bgc_class_2_dcast, select = -Var2)
+df_bgc_class_2_dcast_prop <- df_bgc_class_2_dcast / rowSums(df_bgc_class_2_dcast)
+if (print_table){
+  write.table(df_bgc_class_2_dcast, file="clans_BGC_Class_split_RiPPs_counts.tsv", quote = FALSE, row.names = TRUE, sep = "\t")
+  write.table(df_bgc_class_2_dcast_prop, file="clans_BGC_Class_split_RiPPs_Proportion.tsv", quote = FALSE, row.names = TRUE, sep = "\t")
+}
+# Genus
+genus_genome <- distinct(df_bgc_family[,c("Genome","genus")]) %>% as.data.frame()
+genus_no <- table(genus_genome$genus) %>% as.data.frame()
+genus_keep <- genus_no[genus_no$Freq>100,]$Var1 
+df_bgc_family_2_f$genus_re <- NA
+for (i in 1:nrow(df_bgc_family_2_f)){
+  if (df_bgc_family_2_f[i, "genus"] %in% genus_keep){
+    df_bgc_family_2_f[i, "genus_re"] <- df_bgc_family_2_f[i, "genus"]}
+  else {
+    df_bgc_family_2_f[i, "genus_re"] <-  "others"
+  }
+}
+df_genus_itol <- table(df_bgc_family_2_f$BGC_clan, df_bgc_family_2_f$genus_re) %>% as.data.frame()
+df_genus_itol_dcast <- reshape2::dcast(df_genus_itol, Var1~Var2, value.var = "Freq")
+rownames(df_genus_itol_dcast) <- df_genus_itol_dcast$Var1
+df_genus_itol_dcast <- subset(df_genus_itol_dcast, select = -Var1)
+df_genus_itol_dcast_prop <- df_genus_itol_dcast/rowSums(df_genus_itol_dcast)
+if (print_table){
+  write.table(df_genus_itol_dcast, file="clans_genus_counts.tsv", quote = FALSE, row.names = TRUE, sep = "\t")
+  write.table(df_genus_itol_dcast_prop, file="clans_genus_Proportion.tsv", quote = FALSE, row.names = TRUE, sep = "\t")
+}
+# genus number in clans
+genus_clan <- table(df_bgc_family_2_f$BGC_clan, df_bgc_family_2_f$genus) %>% as.data.frame()
+genus_clan_dcast <- reshape2::dcast(Var1~Var2, data = genus_clan, value.var = "Freq")
+rownames(genus_clan_dcast) <- genus_clan_dcast$Var1
+genus_clan_dcast <- subset(genus_clan_dcast, select = -Var1)
+genus_clan_dcast$genus_total <- rowSums(genus_clan_dcast>0)
+if (print_table){
+  write.table(genus_clan_dcast, file="clans_all_genus_total.tsv", quote = FALSE, row.names = TRUE, sep = "\t")
+}
+
+```
+
+
+# BGC family vs. BGC class
+```{r}
+bgc_class_order <-  c("NRPS", "T3PKS", "Terpene", "RiPPs", "Others")
+df_family_class <- table(df_bgc_family$BGC_family, df_bgc_family$BGC_Class_re) %>% as.data.frame()
+df_family_class_dcast <- reshape2::dcast(df_family_class, Var1~Var2, value.var = "Freq")
+df_family_class_dcast <- df_family_class_dcast[,c("Var1", bgc_class_order)]
+df_family_class_dcast_m <- merge(df_family_class_dcast, df_family_genus_dcast[, c(1,57:58)], by="Var1", all.x = TRUE)
+df_family_class_dcast_m$x <- c(1:nrow(df_family_class_dcast_m))
+df_family_class_dcast_m$y <- df_family_class_dcast_m$genus_count_present * 100
+df_family_class_dcast_m$radius <- df_family_class_dcast_m$total_bgc/100
+cols_five <- c("#ff9d00", "#0039ff", "#8840a5", "#ff0000", "#d5d6d5")
+p1 <- ggplot() + 
+      geom_scatterpie(aes(x=x, y=y, group=Var1,r=radius), data=df_family_class_dcast_m,
+                      cols=names(df_family_class_dcast_m)[2:6], color=NA) +
+      coord_equal() +
+      theme_base()+
+      xlab("BGC family") + ylab("Number of genera in which one GCF is present")+
+      theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())+
+      scale_fill_manual(values = cols_five) +
+      #scale_fill_d3()+ 
+      geom_scatterpie_legend(df_family_class_dcast_m$radius, x=2000, y=2000)
+      #geom_text_repel(data = df_family_class_dcast_m,aes(x, y, label=Var1), size = 2)
+if (print_figure) {
+  ggsave(filename = "Scatterpie_GCF_number_in_different_genera_by_BGC_Class.pdf",plot = p1, useDingbats = FALSE, width = 10,height = 6)
+}
+
+```
+
+
+# BGC family vs. class with spliting RiPPs
+```{r}
+# BGC Class
+df_bgc_class_family <- table(df_bgc_family_2_f$BGC_Class_re, df_bgc_family_2_f$BGC_family) %>% as.data.frame()
+df_bgc_class_family_dcast <- reshape2::dcast(df_bgc_class_family, Var2~Var1, value.var = "Freq")
+rownames(df_bgc_class_family_dcast) <- df_bgc_class_family_dcast$Var2
+df_bgc_class_family_dcast <- subset(df_bgc_class_family_dcast, select = -Var2)
+df_bgc_class_family_dcast_prop <- df_bgc_class_family_dcast / rowSums(df_bgc_class_family_dcast)
+if (print_table){
+  write.table(df_bgc_class_family_dcast, file="clans_BGC_family_counts.tsv", quote = FALSE, row.names = TRUE, sep = "\t")
+  write.table(df_bgc_class_family_dcast_prop, file="clans_BGC_family_Proportion.tsv", quote = FALSE, row.names = TRUE, sep = "\t")
+}
+
+# BGC distribution in different families 
+df_bgc_family$RiPPs_Re <- df_bgc_family$RiPPs_Class
+df_bgc_family$RiPPs_Re[is.na(df_bgc_family$RiPPs_Re)] <- "Non-RiPPs"
+
+df_family_RiPPs <- table(df_bgc_family_2_f$BGC_family, df_bgc_family_2_f$BGC_Class_RiPPs) %>% as.data.frame()
+df_family_RiPPs_dcast <- reshape2::dcast(df_family_RiPPs, Var1~Var2, value.var = "Freq")
+class_order <- c("NRPS", "T3PKS", "Terpene", "cyclic-lactone-autoinducer","lanthipeptide","LAP","lassopeptide","RiPP-like","RRE-containing","rSAM-Modified","others")
+df_family_RiPPs_dcast <- df_family_RiPPs_dcast[,c("Var1", class_order)]
+df_family_RiPPs_dcast_m <- merge(df_family_RiPPs_dcast, df_family_genus_dcast[, c(1,57:58)], by="Var1", all.x = TRUE)
+df_family_RiPPs_dcast_m$x <- c(1:nrow(df_family_RiPPs_dcast_m))
+df_family_RiPPs_dcast_m$y <- df_family_RiPPs_dcast_m$genus_count_present * 100
+df_family_RiPPs_dcast_m$radius <- df_family_RiPPs_dcast_m$total_bgc/100
+cols_eleven <- c("#ff9d00", "#0039ff", "#8840a5", "#fffa00", "#00fd00", "#000000", "#e1aa7a",
+                 "#ff0000", "#985c28", "#ff25ff", "#d5d6d5")
+p2 <- ggplot() + 
+      geom_scatterpie(aes(x=x, y=y, group=Var1,r=radius), data=df_family_RiPPs_dcast_m,
+                      cols=names(df_family_RiPPs_dcast_m)[2:12], color=NA) +
+      coord_equal() +
+      theme_base()+
+      xlab("BGC family") + ylab("Number of genera in which one GCF is present")+
+      theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())+
+      scale_fill_manual(values = cols_eleven) +
+      #scale_fill_d3(palette = "category20")+ 
+      geom_scatterpie_legend(df_family_RiPPs_dcast_m$radius, x=2000, y=1500)
+      #geom_text_repel(data = df_family_RiPPs_dcast_m,aes(x, y, label=Var1), size = 2)
+if (print_figure) {
+  ggsave(filename = "Scatterpie_GCF_number_in_different_genera_by_RiPPs_20220503.pdf",plot = p2, useDingbats = FALSE, width = 10,height = 10)
+}
+```
+
+
+# BGC distance distribution
+```{r}
+df_bgc_family_2_f$min_value <- as.numeric(df_bgc_family_2_f$min_value)
+p1 <- ggplot(df_bgc_family_2_f, aes(min_value, fill=BGC_Class_RiPPs))+
+      geom_histogram(binwidth = 0.01) +
+      theme_base() +
+      scale_fill_d3(palette = "category20")+
+      xlab("BGC distance to known BGCs") +
+      ylab("BGC Count") +
+      geom_vline(aes(xintercept=0.2), colour="#BB0000", linetype="dashed",) +
+      theme(legend.position="none")
+p2 <- ggplot(df_bgc_family_2_f, aes(min_value, fill=genus_re))+
+      geom_histogram(binwidth = 0.01) +
+      theme_base() +
+      scale_fill_d3(palette = "category20")+
+      xlab("BGC distance to known BGCs") +
+      ylab("BGC Count") +
+      geom_vline(aes(xintercept=0.2), colour="#BB0000", linetype="dashed",) +
+      theme(legend.position="none")
+out <- ggarrange(p1, p2, ncol = 2, nrow = 1)
+if (print_figure){
+  ggsave(filename = "BGC_distance.pdf",plot = out, useDingbats = FALSE, width = 12,height = 5)  
+}
+```
+
+
+# genus distribution in GCFs, for iTOL
+```{r}
+genus_family <- table(df_bgc_family_2_f$genus, df_bgc_family_2_f$BGC_family) %>% as.data.frame()
+genus_family_dcast <- reshape2::dcast(genus_family, Var2~Var1, value.var = "Freq")
+rownames(genus_family_dcast) <- genus_family_dcast$Var2
+genus_family_dcast <- subset(genus_family_dcast, select=-Var2)
+if (print_table){
+  write.table(genus_family_dcast, file="GCFs_genus_counts.tsv", quote = FALSE, row.names = TRUE, sep = "\t")
+}
+
+family_select <- rownames(genus_family_dcast)[rowSums(genus_family_dcast>0)>1]
+
+# Genus
+df_genus_family <- table(df_bgc_family_2_f$BGC_family, df_bgc_family_2_f$genus_re) %>% as.data.frame()
+df_genus_family_dcast <- reshape2::dcast(df_genus_family, Var1~Var2, value.var = "Freq")
+rownames(df_genus_family_dcast) <- df_genus_family_dcast$Var1
+df_genus_family_dcast <- subset(df_genus_family_dcast, select = -Var1)
+df_genus_family_dcast_prop <- df_genus_family_dcast/rowSums(df_genus_family_dcast)
+df_genus_family_dcast_f <- df_genus_family_dcast[rownames(df_genus_family_dcast) %in% family_select,]
+df_genus_family_dcast_prop_f <- df_genus_family_dcast_prop[rownames(df_genus_family_dcast_prop) %in% family_select,]
+if (print_table){
+  write.table(df_genus_family_dcast_f, file="212_families_genus_re_counts.tsv", quote = FALSE, row.names = TRUE, sep = "\t")
+  write.table(df_genus_family_dcast_prop_f, file="212_families_genus_re_Proportion.tsv", quote = FALSE, row.names = TRUE, sep = "\t")
+}
+
+# BGC class, showing abundant classes
+df_bgc_class_2_family <- table(df_bgc_family_2_f$BGC_Class_RiPPs, df_bgc_family_2_f$BGC_family) %>% as.data.frame()
+df_bgc_class_2_family_dcast <- reshape2::dcast(df_bgc_class_2_family, Var2~Var1, value.var = "Freq")
+rownames(df_bgc_class_2_family_dcast) <- df_bgc_class_2_family_dcast$Var2
+df_bgc_class_2_family_dcast <- subset(df_bgc_class_2_family_dcast, select = -Var2)
+df_bgc_class_2_family_dcast_prop <- df_bgc_class_2_family_dcast / rowSums(df_bgc_class_2_family_dcast)
+df_bgc_class_2_family_dcast_f <- df_bgc_class_2_family_dcast %>% filter(rownames(df_bgc_class_2_family_dcast) %in% family_select)
+df_bgc_class_2_family_dcast_prop_f <- df_bgc_class_2_family_dcast_prop %>% filter(rownames(df_bgc_class_2_family_dcast_prop) %in% family_select)
+if (print_table){
+  write.table(df_bgc_class_2_family_dcast_f, file="212_families__BGC_Class_split_RiPPs_counts.tsv", quote = FALSE, row.names = TRUE, sep = "\t")
+  write.table(df_bgc_class_2_family_dcast_prop_f, file="212_families_BGC_Class_split_RiPPs_Proportion.tsv", quote = FALSE, row.names = TRUE, sep = "\t")
+}
+
+# SAG and MAG presence
+df_SAG_MAG_family <- table(df_bgc_family_f$BGC_family, df_bgc_family_f$genome_type) %>% as.data.frame()
+df_SAG_MAG_family_dcast <- reshape2::dcast(df_SAG_MAG_family, Var1~Var2, value.var = "Freq")
+df_SAG_MAG_family_dcast_f <- df_SAG_MAG_family_dcast %>% filter(Var1 %in% family_select)
+if (print_table){
+  write.table(df_SAG_MAG_family_dcast_f, file="212_families_SAG_MAG.tsv", quote = FALSE, row.names = FALSE, sep = "\t")
+}
+# MiBiG distance
+df_clan_dist_family <- aggregate(min_value ~ BGC_family, data = df_bgc_family_2_f, mean)
+names(df_clan_dist_family) <- c("BGC_family", "Average_mibig_dist")
+df_clan_dist_family_f <- df_clan_dist_family %>% filter(BGC_family %in% family_select)
+if (print_table){
+  write.table(df_clan_dist_family_f, file="212_families_average_mibig_dist.tsv", quote = FALSE, row.names = FALSE, sep = "\t")
+}
+
+```
+
+
+# add deduplication information
+```{r}
+df_replicate <- read.delim2("genome_31977_0.8_DNA__all_BGCs_deduplication.tsv")
+df_replicate$gbk <- gsub("/data3/zhangdw/03.Project/06.LAB/11.bigslice_for_all_BGCs/input_31977_genomes/","",df_replicate$BGC_path, fixed = TRUE)
+df_replicate$representative <- ifelse(df_replicate$BGC_path==df_replicate$Representative_BGC_path, "Y", "N")
+df_bgc_family$temp <- paste(df_bgc_family$label,"/",df_bgc_family$Genome,"/",df_bgc_family$GBK,sep = "")
+df_bgc_merge <- merge(df_bgc_family, df_replicate, by.x="temp", by.y = "gbk", all.x = TRUE)
+df_bgc_merge$bgc_id <- paste("bgc",df_bgc_merge$id, sep = "")
+if (print_table){
+  write.table(df_bgc_merge, file="All_130051_BGCs_family_add_0.8_deduplication.tsv", quote = FALSE, row.names = FALSE, sep = "\t")
+}
+```
+
+
+# explore domain presence
+```{r}
+save_pheatmap_pdf <- function(x, filename, width=7, height=7) {
+   stopifnot(!missing(x))
+   stopifnot(!missing(filename))
+   pdf(filename, width=width, height=height)
+   grid::grid.newpage()
+   grid::grid.draw(x$gtable)
+   dev.off()
+}
+
+clan_domain <- read.table("clan_percentage_all_domain_part.tsv", check.names=FALSE, header=TRUE, row.names=1, colClasses="numeric", sep = "\t", fill = TRUE)
+family_domain <- read.table("family_percentage_all_domain_part.tsv", check.names=FALSE, header=TRUE, row.names=1, colClasses="numeric", sep = "\t", fill = TRUE)
+
+rownames(clan_domain) <- paste("GCC_", rownames(clan_domain), sep = "")
+rownames(family_domain) <- paste("GCF_", rownames(family_domain), sep = "")
+
+clan_bgc_no <- table(df_bgc_family_2_f$BGC_clan) %>% as.data.frame()
+family_bgc_no <- table(df_bgc_family_2_f$BGC_family) %>% as.data.frame()
+clan_bgc_no_f <- clan_bgc_no %>% filter(Freq>100)
+family_bgc_no_f <- family_bgc_no %>% filter(Freq>100)
+
+clan_genus_no <- table(distinct(df_bgc_family_2_f[,c("BGC_clan", "genus")])$BGC_clan) %>% as.data.frame()
+family_genus_no <- table(distinct(df_bgc_family_2_f[,c("BGC_family", "genus")])$BGC_family) %>% as.data.frame()
+
+############################################################################################
+# Domain distribution in GCF_122
+############################################################################################
+domian_gcf122 <- family_domain["GCF_122", ] %>% t() %>% as.data.frame()
+domian_gcf122$domian <- rownames(domian_gcf122)
+domian_gcf122 <- domian_gcf122[order(domian_gcf122$GCF_122, decreasing = TRUE), ]
+domian_gcf122_f <- domian_gcf122[domian_gcf122$GCF_122>10,]
+domian_gcf122_f$domian <- factor(domian_gcf122_f$domian, levels = rev(domian_gcf122_f$domian))
+
+p <- ggplot(data=domian_gcf122_f, aes(x=domian, y=GCF_122)) +
+      geom_bar(stat="identity")+
+      coord_flip()+
+      xlab("")+
+      ylab("Prevalence (%)")+
+      theme_bw()
+
+ggsave(filename = "GCF122_domain_prevalence.pdf",plot = p, useDingbats = FALSE, width = 7, height = 5)
+
+
+############################################################################################
+# Clan level
+############################################################################################
+# (1) only extract the clans/families occupies by >80% of one BGC
+# (2) only show clans containing >100 BGCs
+# (3) only fetch top 5 domians for each clan
+#class_retain <- c("cyclic-lactone-autoinducer","lanthipeptide","LAP","lassopeptide","RiPP-like","RRE-containing","rSAM-Modified","thiopeptide","NRPS","PKS","Terpene")
+class_retain <- c("cyclic-lactone-autoinducer","lanthipeptide","RiPP-like","RRE-containing")
+df_GCC <- data.frame()
+domain_v <- vector()
+for (bgc_class in class_retain) {
+  df_clans_d <- clan_domain[rownames(df_bgc_class_2_dcast_prop)[df_bgc_class_2_dcast_prop[,bgc_class]>0.8], ]
+  if (nrow(df_clans_d)>0){
+    df_clans_d <- df_clans_d[rownames(df_clans_d) %in% clan_bgc_no_f$Var1, ]
+    clan_fetch <- rownames(df_clans_d)
+    df_clan_select <- data.frame(type=rep(bgc_class, length(clan_fetch)),
+                                   clans = clan_fetch)
+    df_GCC <- rbind(df_GCC, df_clan_select)
+    for (x in 1:nrow(df_clans_d)) {
+      df_tmp <- df_clans_d[x,] %>% t() %>% as.data.frame()
+      top_5_domains <- rownames(df_tmp)[order(df_tmp[,1],decreasing = TRUE)[1:5]]
+      domain_v <- unique(c(domain_v, top_5_domains))
+  }
+  }
+}
+
+df_clan_domain_part <- clan_domain[df_GCC$clans, domain_v]
+df_clan_domain_part <- df_clan_domain_part %>% t() %>% as.data.frame()
+
+clan_genus_no_select <- clan_genus_no %>% filter(Var1 %in% names(df_clan_domain_part))
+index <- factor(clan_genus_no_select$Var1, levels = names(df_clan_domain_part))
+clan_genus_no_select <- clan_genus_no_select[order(index), ]
+
+clan_bgc_no_select <- clan_bgc_no %>% filter(Var1 %in% names(df_clan_domain_part))
+index2 <- factor(clan_bgc_no_select$Var1, levels = names(df_clan_domain_part))
+clan_bgc_no_select <- clan_bgc_no_select[order(index2), ]
+
+annotation_col = data.frame(Genus_Count = clan_genus_no_select$Freq,
+                            BGC_Count = clan_bgc_no_select$Freq)
+ann_colors = list(Genus_Count = c("#ffffff", "#49617a"),
+                  BGC_Count = c("#ffffff", "#030604"))
+
+# pdf(file = "figures_S8_Clans_doamain_distribution_all.pdf",,height = 15, width = 12)
+# par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+# pheatmap(as.matrix(df_clan_domain_part), 
+#           cellwidth = 15,
+#           cellheight = 5,
+#           cluster_cols = FALSE,
+#           annotation_col = annotation_col, 
+#           annotation_colors = ann_colors,
+#           border_color = "grey",
+#           gaps_col = c(5, 9, 10,11,23,28,29,30,31))
+# dev.off()
+pdf(file = "Clans_doamain_distribution_part.pdf",,height = 15, width = 12)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+pheatmap(as.matrix(df_clan_domain_part), 
+       cellwidth = 15,
+       cellheight = 5,
+       cluster_cols = FALSE,
+       annotation_col = annotation_col, 
+       annotation_colors = ann_colors,
+       border_color = "grey",
+       gaps_col = c(5, 9, 21))
+dev.off()
+
+
+############################################################################################
+# family level
+############################################################################################
+# (1) only extract the families occupies by >80% of one BGC
+# (2) only show clans containing >100 BGCs
+# (3) only fetch top 5 domians for each family
+df_bgc_class_2_family <- table(df_bgc_family_2_f$BGC_Class_RiPPs, df_bgc_family_2_f$BGC_family) %>% as.data.frame()
+df_bgc_class_2_family_dcast <- reshape2::dcast(df_bgc_class_2_family, Var2~Var1, value.var = "Freq")
+rownames(df_bgc_class_2_family_dcast) <- df_bgc_class_2_family_dcast$Var2
+df_bgc_class_2_family_dcast <- subset(df_bgc_class_2_family_dcast, select = -Var2)
+df_bgc_class_2_family_dcast_prop <- df_bgc_class_2_family_dcast / rowSums(df_bgc_class_2_family_dcast)
+
+class_retain <- c("cyclic-lactone-autoinducer","lanthipeptide","LAP","lassopeptide","RiPP-like","RRE-containing","rSAM-Modified","thiopeptide","NRPS","PKS","Terpene")
+# run for each one
+  df_GCF <- data.frame()
+  domain_v <- vector()
+  df_family_d <- family_domain[rownames(df_bgc_class_2_family_dcast_prop)[df_bgc_class_2_family_dcast_prop[,"RiPP-like"]>0.8], ]
+  if (nrow(df_family_d)>0){
+    df_family_d <- df_family_d[rownames(df_family_d) %in% family_bgc_no_f$Var1, ]
+    family_fetch <- rownames(df_family_d)
+    df_family_select <- data.frame(type=rep("Terpene", length(family_fetch)),
+                                   family = family_fetch)
+    df_GCF <- rbind(df_GCF, df_family_select)
+    for (x in 1:nrow(df_family_d)) {
+      df_tmp <- df_family_d[x,] %>% t() %>% as.data.frame()
+      top_5_domains <- rownames(df_tmp)[order(df_tmp[,1],decreasing = TRUE)[1:5]]
+      domain_v <- unique(c(domain_v, top_5_domains))
+  }
+  }
+  df_family_domain_part <- family_domain[df_GCF$family, domain_v]
+  df_family_domain_part <- df_family_domain_part %>% t() %>% as.data.frame()
+  
+  family_genus_no_select <- family_genus_no %>% filter(Var1 %in% names(df_family_domain_part))
+  index <- factor(family_genus_no_select$Var1, levels = names(df_family_domain_part))
+  family_genus_no_select <- family_genus_no_select[order(index), ]
+  
+  family_bgc_no_select <- family_bgc_no %>% filter(Var1 %in% names(df_family_domain_part))
+  index2 <- factor(family_bgc_no_select$Var1, levels = names(df_family_domain_part))
+  family_bgc_no_select <- family_bgc_no_select[order(index2), ]
+  
+  annotation_col = data.frame(Genus_Count = family_genus_no_select$Freq,
+                              BGC_Count = family_bgc_no_select$Freq)
+  ann_colors = list(Genus_Count = c("#ffffff", "#49617a"),
+                    BGC_Count = c("#ffffff", "#030604"))
+  
+  pdf(file = paste("Familys_doamain_distribution_","Terpene",".pdf",sep = ""),height = 15, width = 12)
+  par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+  pheatmap(as.matrix(df_family_domain_part), 
+         cellwidth = 25,
+         cellheight = 10,
+         cluster_cols = TRUE,
+         annotation_col = annotation_col, 
+         annotation_colors = ann_colors,
+         border_color = "grey")
+  dev.off()
+  
+```
+
+
+# statistics for GCFs
+```{r}
+################################################################################
+# Genus level
+################################################################################
+GCF_list <- unique(df_bgc_family_2_f$BGC_family)
+df_family_genus_class <- data.frame()
+for (family in GCF_list){
+  df_sub_family <- df_bgc_family_2_f[df_bgc_family_2_f$BGC_family==family, ]
+  genus_no <- length(unique(df_sub_family$genus))
+  # the BGC Class present in 80% of one family, assign it to this family
+  df_prop_table <- prop.table(table(df_sub_family$BGC_Class_RiPPs))
+  family_BGC_class <- names(df_prop_table)[df_prop_table>0.8]
+  if (identical(family_BGC_class, character(0))){
+    family_BGC_class <- "others"
+  }
+  df_tmp <- data.frame(family = family,
+                        genus_no = genus_no,
+                       BGC_class = family_BGC_class,
+                       stringsAsFactors = FALSE)
+  df_family_genus_class <- rbind(df_family_genus_class, df_tmp)
+}
+df_family_genus_class$y <- 1
+df_family_genus_class$BGC_class <- factor(df_family_genus_class$BGC_class, levels = class_order)
+
+p_genus_family <- ggplot(df_family_genus_class, aes(x=genus_no, y=y, fill=BGC_class)) +
+                    geom_bar(stat="identity", width=0.9) +
+                    coord_flip()+
+                    scale_fill_manual(values = cols_eleven)+
+                    theme_base()+
+                    theme(legend.position="none")+
+                    xlab("")+
+                    ylab("GCF Count")
+
+p_genus_family_b <- p_genus_family + scale_y_break(c(130, 2600), scales = 0.3)
+
+ggsave(filename = "GCF_genus_class_20220503.pdf",plot = p_genus_family_b, useDingbats = FALSE, width = 10,height = 8)
+
+
+# pie chart
+df_family_genus_class_cross <- df_family_genus_class %>% filter(genus_no>1)
+df_family_genus_class_uniq <- df_family_genus_class %>% filter(genus_no==1)
+
+t_cross <- df_family_genus_class_cross$BGC_class %>% table() %>% as.data.frame()
+t_uniq <- df_family_genus_class_uniq$BGC_class %>% table() %>% as.data.frame()
+
+names(t_cross) <- c("class","count")
+names(t_uniq) <- c("class","count")
+t_cross$class <- factor(t_cross$class, levels = class_order)
+t_uniq$class <- factor(t_uniq$class, levels = class_order)
+t_cross$percentage <- t_cross$count / sum(t_cross$count) * 100
+t_uniq$percentage <- t_uniq$count / sum(t_uniq$count) * 100
+t_uniq$type <- "Unique"
+t_cross$type <- "Cross"
+
+p_cross <- ggplot(t_cross, aes(x="", y=count, fill=class)) +
+            geom_bar(stat="identity", width=1) +
+            coord_polar("y", start=0)+
+            theme_void()+
+            scale_fill_manual(values = cols_eleven)
+p_uniq <- ggplot(t_uniq, aes(x="", y=count, fill=class)) +
+            geom_bar(stat="identity", width=1) +
+            coord_polar("y", start=0)+
+            theme_void()+
+            scale_fill_manual(values = cols_eleven)
+ggsave(filename = "Proportion_cross_GCFs.pdf",plot = p_cross, useDingbats = FALSE, width = 6, height = 4)
+ggsave(filename = "Proportion_unique_GCFs.pdf",plot = p_uniq, useDingbats = FALSE, width = 6, height = 4)
+
+out_gcf <- rbind(t_uniq, t_cross)
+write.table(out_gcf, file = "Table_proportion_GCFs.tsv", row.names = FALSE, quote = FALSE, sep = "\t")
+
+# simplify the figure
+gcf.genus.no <- table(df_family_genus_class$genus_no) %>% as.data.frame()
+
+p_genus_no <- ggplot(gcf.genus.no, aes(x=Var1, y=Freq)) +
+                    geom_bar(stat="identity", width=0.9) +
+                    theme_base()+
+                    theme(legend.position="none")+
+                    xlab("Number of different phyla")+
+                    ylab("GCF Count")
+p_genus_no_b <- p_genus_no + scale_y_break(c(130, 2600), scales = 0.3)
+ggsave(filename = "GCFs_in_different_phylum.pdf",plot = p_genus_no_b, useDingbats = FALSE, width = 6.5, height = 4)
+
+################################################################################
+# Species level
+################################################################################
+gcf_species <- unique(df_bgc_family_2_f[,c("BGC_family", "species")])
+gcf_species.no <- table(gcf_species$BGC_family) %>% as.data.frame()
+gcf_species.no.no <- table(gcf_species.no$Freq) %>% as.data.frame()
+gcf_species.no.no$Var1 <- as.numeric(as.character(gcf_species.no.no$Var1))
+gcf_species.no.no_sub <- gcf_species.no.no[gcf_species.no.no$Var1<=10,]
+gcf_species.no.no_sub_m <- rbind(gcf_species.no.no_sub,
+                                 data.frame(Var1=">10",Freq=sum(gcf_species.no.no[gcf_species.no.no$Var1>10,]$Freq)))
+gcf_species.no.no_sub_m$Var1 <- factor(gcf_species.no.no_sub_m$Var1, levels = c("1","2","3","4","5","6","7","8","9","10",">10"))
+
+p_species_no <- ggplot(gcf_species.no.no_sub_m, aes(x=Var1, y=Freq)) +
+                    geom_bar(stat="identity", width=0.9) +
+                    theme_base()+
+                    theme(legend.position="none")+
+                    xlab("Number of different species")+
+                    ylab("GCF Count")
+p_species_no_b <- p_species_no + scale_y_break(c(320, 2000), scales = 0.3)
+ggsave(filename = "GCFs_in_different_species.pdf",plot = p_species_no_b, useDingbats = FALSE, width = 6.5, height = 4)
+
+################################################################################
+# Genome level
+################################################################################
+gcf_genome <- unique(df_bgc_family_2_f[,c("BGC_family", "Genome")])
+gcf_genome.no <- table(gcf_genome$BGC_family) %>% as.data.frame()
+gcf_genome.no.no <- table(gcf_genome.no$Freq) %>% as.data.frame()
+gcf_genome.no.no$Var1 <- as.numeric(as.character(gcf_genome.no.no$Var1))
+gcf_genome.no.no.p <- data.frame("1"=gcf_genome.no.no[gcf_genome.no.no$Var1==1,]$Freq,
+                                 "2~100"=sum(gcf_genome.no.no[gcf_genome.no.no$Var1>=2 & gcf_genome.no.no$Var1<=100,]$Freq),
+                                 "101~1000"=sum(gcf_genome.no.no[gcf_genome.no.no$Var1>=101 & gcf_genome.no.no$Var1<=1000,]$Freq),
+                                 ">1000"=sum(gcf_genome.no.no[gcf_genome.no.no$Var1>1000,]$Freq),
+                                 stringsAsFactors = FALSE, check.names = FALSE)
+gcf_genome.no.no.p.t <- gcf_genome.no.no.p %>% t() %>% as.data.frame()
+gcf_genome.no.no.p.t$interval <- rownames(gcf_genome.no.no.p.t)
+gcf_genome.no.no.p.t$interval <- factor(gcf_genome.no.no.p.t$interval, levels = c("1","2~100","101~1000",">1000"))
+p_genome_no <- ggplot(gcf_genome.no.no.p.t, aes(x=interval, y=V1)) +
+                    geom_bar(stat="identity", width=0.9) +
+                    theme_base()+
+                    theme(legend.position="none")+
+                    xlab("Number of different genomes")+
+                    ylab("GCF Count")
+ggsave(filename = "GCFs_in_different_genome.pdf",plot = p_genome_no, useDingbats = FALSE, width = 4.5, height = 4)
+```
+
+
+# domain presence of RiPP-like GCCs
+```{r}
+df_GCC <- data.frame()
+domain_v <- vector()
+
+df_clans_d <- clan_domain[rownames(df_bgc_class_2_dcast_prop)[df_bgc_class_2_dcast_prop[,"RiPP-like"]>0.8], ]
+
+clan_fetch <- rownames(df_clans_d)
+df_clan_select <- data.frame(type=rep("RiPP-like", length(clan_fetch)),
+                               clans = clan_fetch)
+df_GCC <- rbind(df_GCC, df_clan_select)
+for (x in 1:nrow(df_clans_d)) {
+  df_tmp <- df_clans_d[x,] %>% t() %>% as.data.frame()
+  top_5_domains <- rownames(df_tmp)[order(df_tmp[,1],decreasing = TRUE)[1:5]]
+  domain_v <- unique(c(domain_v, top_5_domains))
+}
+
+df_clan_domain_part <- clan_domain[df_GCC$clans, domain_v]
+df_clan_domain_part <- df_clan_domain_part %>% t() %>% as.data.frame()
+
+clan_genus_no_select <- clan_genus_no %>% filter(Var1 %in% names(df_clan_domain_part))
+index <- factor(clan_genus_no_select$Var1, levels = names(df_clan_domain_part))
+clan_genus_no_select <- clan_genus_no_select[order(index), ]
+
+clan_bgc_no_select <- clan_bgc_no %>% filter(Var1 %in% names(df_clan_domain_part))
+index2 <- factor(clan_bgc_no_select$Var1, levels = names(df_clan_domain_part))
+clan_bgc_no_select <- clan_bgc_no_select[order(index2), ]
+
+annotation_col = data.frame(Genus_Count = clan_genus_no_select$Freq,
+                            BGC_Count = clan_bgc_no_select$Freq)
+ann_colors = list(Genus_Count = c("#ffffff", "#49617a"),
+                  BGC_Count = c("#ffffff", "#030604"))
+
+pdf(file = paste("Domain_distribution_23_RiPP-like_GCCs.pdf",sep = ""),height = 15, width = 12)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+pheatmap(as.matrix(df_clan_domain_part), 
+       cellwidth = 30,
+       cellheight = 10,
+       cluster_cols = TRUE,
+       annotation_col = annotation_col, 
+       annotation_colors = ann_colors,
+       border_color = "grey")
+dev.off()
+
+write.table(df_clan_domain_part, file = "Domain_distribution_23_RiPP-like_GCCs.tsv", row.names = TRUE, quote = FALSE, sep = "\t")
+
+```
+
+
+# domain presence of RiPP-like GCFs
+```{r}
+corss_gcf <- df_family_genus_class[df_family_genus_class$genus_no>1, ]$family
+
+df_GCF <- data.frame()
+domain_v <- vector()
+df_family_d <- family_domain[rownames(df_bgc_class_2_family_dcast_prop)[df_bgc_class_2_family_dcast_prop[,"RiPP-like"]>0.8], ]
+
+df_family_d <- df_family_d[rownames(df_family_d) %in% corss_gcf, ]
+family_fetch <- rownames(df_family_d)
+df_family_select <- data.frame(type=rep("RiPP", length(family_fetch)),
+                               family = family_fetch)
+df_GCF <- rbind(df_GCF, df_family_select)
+for (x in 1:nrow(df_family_d)) {
+  df_tmp <- df_family_d[x,] %>% t() %>% as.data.frame()
+  top_5_domains <- rownames(df_tmp)[order(df_tmp[,1],decreasing = TRUE)[1:5]]
+  domain_v <- unique(c(domain_v, top_5_domains))
+}
+
+df_family_domain_part <- family_domain[df_GCF$family, domain_v]
+df_family_domain_part <- df_family_domain_part %>% t() %>% as.data.frame()
+
+family_genus_no_select <- family_genus_no %>% filter(Var1 %in% names(df_family_domain_part))
+index <- factor(family_genus_no_select$Var1, levels = names(df_family_domain_part))
+family_genus_no_select <- family_genus_no_select[order(index), ]
+
+family_bgc_no_select <- family_bgc_no %>% filter(Var1 %in% names(df_family_domain_part))
+index2 <- factor(family_bgc_no_select$Var1, levels = names(df_family_domain_part))
+family_bgc_no_select <- family_bgc_no_select[order(index2), ]
+
+annotation_col = data.frame(Genus_Count = family_genus_no_select$Freq,
+                            BGC_Count = family_bgc_no_select$Freq)
+ann_colors = list(Genus_Count = c("#ffffff", "#49617a"),
+                  BGC_Count = c("#ffffff", "#030604"))
+
+pdf(file = paste("Family_doamain_distribution_88_cross_genus_RiPP-like.pdf",sep = ""),height = 15, width = 12)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+pheatmap(as.matrix(df_family_domain_part), 
+       cellwidth = 15,
+       cellheight = 10,
+       cluster_cols = TRUE,
+       annotation_col = annotation_col, 
+       annotation_colors = ann_colors,
+       border_color = "grey")
+dev.off()
+
+write.table(df_family_domain_part, file = "Family_doamain_distribution_88_cross_genus_RiPP-like.tsv", row.names = TRUE, quote = FALSE, sep = "\t")
+
+```

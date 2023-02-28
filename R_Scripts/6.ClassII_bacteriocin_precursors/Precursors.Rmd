@@ -1,0 +1,282 @@
+---
+title: "precursors"
+output: html_document
+date: '2022-05-21'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# load requirements
+```{r}
+library(ggplot2)
+library(dplyr)
+library(VennDiagram)
+library(vegan)
+library(openxlsx)
+library(ggthemes)
+library(pheatmap)
+```
+
+# processing
+```{r}
+# RiPP-like BGCs
+df_bgc <- read.delim2("../../05.Different_body_sites/02.version_2/All_130051_LAB_BGCs.tsv")
+df_rippslike <- df_bgc[df_bgc$Type=="RiPP-like", ] 
+
+# precursor
+df_summary <- read.delim2("combine_summary_combined.tsv")
+df_summary$length <- nchar(df_summary$Sequence)
+df_summary_classII <- df_summary %>% filter(Precursor_Class == "Class_II")
+# filter length > 150 aa
+df_summary_classII_f <- df_summary_classII %>% filter(length<=150)
+
+# cdhit clustering
+df_cdhit <- read.xlsx("cluster.cdhit_one_vs_one.xlsx", sheet = 1)
+# domian class
+df_domain <- read.xlsx("20220518_hmmsearch_domains.xlsx", sheet = 2)
+
+# output all precursors
+df_all_precursors <- merge(df_summary, df_bgc, by.x = "bgcID", by.y = "bgc_id", all.x = TRUE)
+write.table(df_all_precursors, file = "All_193467_precursors_detected_info.tsv", sep = "\t", quote = FALSE, row.names = FALSE)
+
+
+###########################################################################
+# Venn diagram
+###########################################################################
+seq_approach <- table(df_summary_classII_f$Approach) %>% as.data.frame()
+venn.plot <- venn.diagram(x = list(hmmsearch = 1:(30746+97623), BAGEL=97624:sum(seq_approach$Freq)),
+                          lwd = 4,
+                          filename = NULL,
+                          fill = c("blue", "red"),
+                          alpha =0.7,
+                          label.col = "white",
+                          cex =4 ,
+                          at.pos = c(-20, 14)) 
+
+pdf(file = "Venn.pdf",height = 5, width = 5)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+grid.draw(venn.plot)
+dev.off()
+
+###########################################################################
+# Length distribution
+###########################################################################
+uni_hmm <- df_summary_classII_f[df_summary_classII_f$Approach=="hmmsearch",]
+uni_bagel <- df_summary_classII_f[df_summary_classII_f$Approach=="bagel4",]
+com <- df_summary_classII_f[df_summary_classII_f$Approach=="both",]
+df_summary_classII_f$Approach <- factor(df_summary_classII_f$Approach, levels = c("hmmsearch","bagel4","both"))
+
+p_density <- ggplot() +
+              geom_density(data=uni_hmm, aes(length), color="blue")+
+              geom_density(data=uni_bagel, aes(length), color="black")+
+              geom_density(data=com, aes(length), color="green")+
+              geom_density(data=df_summary_classII_f, aes(length), color="red")+
+              theme_base()+
+              xlab("Length (aa)")
+
+p2 <- ggplot(df_summary_classII_f, aes(length, fill=Approach))+
+      geom_histogram(binwidth = 1) +
+      theme_base() +
+      scale_fill_manual(values = c("blue","red","black"))+
+      xlab("Length (aa)") +
+      ylab("Counts")+
+      scale_x_continuous(breaks = seq(10, 150, 10))
+      #geom_vline(aes(xintercept=0.2), colour="#BB0000", linetype="dashed",) +
+      #theme(legend.position="none")
+
+ggsave(filename = "Length_distribution_density.pdf", plot = p_density, useDingbats = FALSE, width = 5.2,height = 5)
+ggsave(filename = "Length_distribution_barplot.pdf", plot = p2, useDingbats = FALSE, width = 7, height = 5)
+
+###########################################################################
+# domain distribution
+###########################################################################
+df_summary_classII_f$Raw <- paste(df_summary_classII_f$bgcID, df_summary_classII_f$Locus, sep = "__")
+df_summary_classII_f_c <- merge(df_summary_classII_f, df_cdhit, by.x="Raw", by.y = "Precursor", all.x = TRUE)
+df_summary_classII_f_c2 <- merge(df_summary_classII_f_c, df_domain, by.x="hitDomain", by.y = "Domains", all.x = TRUE)
+
+# hmmsearch
+hmm_domain.no <- table(df_summary_classII_f_c2$Domain_class) %>% as.data.frame()
+hmm_domain.no <- hmm_domain.no[order(hmm_domain.no$Freq, decreasing = TRUE), ]
+hmm_domain.no$percentage <- hmm_domain.no$Freq / sum(hmm_domain.no$Freq) *100
+# bagel4
+bagel.no <- table(df_summary_classII_f_c2[df_summary_classII_f_c2$Approach!="hmmsearch",]$Class_BAGEL4) %>% as.data.frame()
+bagel.no <- bagel.no[order(bagel.no$Freq, decreasing = TRUE), ]
+bagel.no$percentage <- bagel.no$Freq / sum(bagel.no$Freq) * 100
+
+write.csv(hmm_domain.no, file = "Domain_number_hmmsearch.csv", sep = ",", row.names = FALSE, quote = FALSE)
+write.csv(bagel.no, file = "Hit_bagel4_number_hmmsearch.csv", sep = ",", row.names = FALSE, quote = FALSE)
+
+###########################################################################
+# Length distribution of representative precursors 
+###########################################################################
+df_rep_cdhit <- read.xlsx("cluster.cdhit_overall.xlsx", sheet = 1)
+df_rep_cdhit <- df_rep_cdhit[,1:4]
+df_summary_classII_f_c3 <- merge(df_summary_classII_f_c2, df_rep_cdhit, by = "Cluster_re", all.x = TRUE)
+df_summary_classII_f_c3$rep <- ifelse(df_summary_classII_f_c3$Raw==df_summary_classII_f_c3$Representative_Gene, "Y", "N")
+df_representative <- df_summary_classII_f_c3[df_summary_classII_f_c3$rep=="Y",]
+df_representative$Approach <- factor(df_representative$Approach, levels = c("hmmsearch","bagel4","both"))
+
+p2 <- ggplot(df_representative, aes(length, fill=Approach))+
+      geom_histogram(binwidth = 1) +
+      theme_base() +
+      scale_fill_manual(values = c("blue","red","black"))+
+      xlab("Length (aa)") +
+      ylab("Counts of cluster")+
+      scale_x_continuous(breaks = seq(10, 150, 10))
+ggsave(filename = "Length_distribution_barplot_precursor_cluster.pdf", plot = p2, useDingbats = FALSE, width = 7, height = 5)
+
+###########################################################################
+# cluster distribution
+###########################################################################
+cluster_no <- table(df_summary_classII_f_c3$Cluster_re) %>% as.data.frame()
+cluster_no <- cluster_no[order(cluster_no$Freq, decreasing = TRUE), ]
+
+df_summary_out <- merge(df_summary_classII_f_c3, df_bgc, by.x = "bgcID", by.y = "bgc_id", all.x = TRUE)
+write.table(df_summary_out, file = "All_187649_classII_precursors_info.tsv", sep = "\t", quote = FALSE, row.names = FALSE)
+
+
+# add taxonomy
+df_summary_classII_f_c_ta <- merge(df_summary_classII_f_c3, df_bgc[,c("bgc_id","family","genus","species","BGC_family","Genome")], by.x = "bgcID", by.y = "bgc_id", all.x = TRUE)
+
+# pfam domain vs. genus
+df_hmm_genus <- table(df_summary_classII_f_c_ta[,c("Domain_class","genus")]) %>% as.data.frame.matrix()
+df_hmm_genus_log <- log10(df_hmm_genus)
+df_hmm_genus_log <- do.call(data.frame,lapply(df_hmm_genus_log, function(x) replace(x, is.infinite(x),NA)))
+rownames(df_hmm_genus_log) <- rownames(df_hmm_genus)
+df_hmm_genus_log_t <- df_hmm_genus_log %>% t() %>% as.data.frame()
+
+pdf(file = "hmmsear_domian_distribution_in_genus.pdf",,height = 15, width = 12)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+pheatmap(as.matrix(df_hmm_genus_log_t),
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,
+         cellwidth = 15,
+         cellheight = 10,
+         border_color = "grey",
+         na_col = "grey")
+dev.off()
+
+# cluster number vs. genus
+cluster_taxo <- table(unique(df_summary_classII_f_c_ta[,c("Cluster_re","genus")])) %>% as.data.frame()
+cluster_taxo_dcast <- reshape2::dcast(cluster_taxo, Cluster_re~genus, value.var = "Freq")
+rownames(cluster_taxo_dcast) <- cluster_taxo_dcast$Cluster_re
+cluster_taxo_dcast <- subset(cluster_taxo_dcast, select = -Cluster_re)
+
+cluster_in_genus <- rowSums(cluster_taxo_dcast>0) %>% as.data.frame()
+names(cluster_in_genus) <- "genus_no"
+cluster_in_genus_no <- table(cluster_in_genus$genus_no) %>% as.data.frame()
+
+#cluster_in_genus_no$label <- paste(cluster_in_genus_no$Var1,"phyla",sep = "_")
+
+p <- ggplot(data=cluster_in_genus_no, aes(x=Var1, y=Freq)) +
+       geom_bar(stat="identity")+
+      #geom_text(aes(label = Freq), vjust = 0)+
+       theme_base()+
+      #theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))+
+      ylab("Number of cluster")+
+      xlab("Number of different phyla")
+ggsave(filename = "Cluster_number_at_genus_level.pdf", plot = p, useDingbats = FALSE, width = 6, height = 5)
+
+
+# cluster number vs. species
+cluster_species <- table(unique(df_summary_classII_f_c_ta[,c("Cluster_re","species")])) %>% as.data.frame()
+cluster_species_dcast <- reshape2::dcast(cluster_species, Cluster_re~species, value.var = "Freq")
+rownames(cluster_species_dcast) <- cluster_species_dcast$Cluster_re
+cluster_species_dcast <- subset(cluster_species_dcast, select = -Cluster_re)
+cluster_in_species <- rowSums(cluster_species_dcast>0) %>% as.data.frame()
+names(cluster_in_species) <- "species_no"
+cluster_in_species$Cluster <- rownames(cluster_in_species)
+cluster_in_species <- cluster_in_species[order(cluster_in_species$species_no, decreasing = TRUE), ]
+df_plot_species <- data.frame("1"=nrow(cluster_in_species[cluster_in_species$species_no==1,]),
+                              "2"=nrow(cluster_in_species[cluster_in_species$species_no==2,]),
+                              "3"=nrow(cluster_in_species[cluster_in_species$species_no==3,]),
+                              "4"=nrow(cluster_in_species[cluster_in_species$species_no==4,]),
+                              "5"=nrow(cluster_in_species[cluster_in_species$species_no==5,]),
+                              ">5"=nrow(cluster_in_species[cluster_in_species$species_no>5,]),
+                              check.names = FALSE)
+df_plot_species_t <- df_plot_species %>% t() %>% as.data.frame()
+df_plot_species_t$label <- rownames(df_plot_species_t)
+df_plot_species_t$label <- factor(df_plot_species_t$label, c("1","2","3","4","5",">5"))
+
+p_species <- ggplot(data=df_plot_species_t, aes(x=label, y=V1)) +
+               geom_bar(stat="identity")+
+               #geom_text(aes(label = V1), vjust = 0)+
+               theme_base()+
+              ylab("Number of cluster")+
+              xlab("Number of different species")
+
+ggsave(filename = "Cluster_number_at_species_level.pdf", plot = p_species, useDingbats = FALSE, width = 5, height = 5)
+
+
+# cluster number vs. genomes
+cluster_genome <- table(unique(df_summary_classII_f_c_ta[,c("Cluster_re","Genome")])) %>% as.data.frame()
+cluster_genome_dcast <- reshape2::dcast(cluster_genome, Cluster_re~Genome, value.var = "Freq")
+rownames(cluster_genome_dcast) <- cluster_genome_dcast$Cluster_re
+cluster_genome_dcast <- subset(cluster_genome_dcast, select = -Cluster_re)
+cluster_in_genome <- rowSums(cluster_genome_dcast>0) %>% as.data.frame()
+names(cluster_in_genome) <- "genome_no"
+cluster_in_genome$Cluster <- rownames(cluster_in_genome)
+cluster_in_genome <- cluster_in_genome[order(cluster_in_genome$genome_no, decreasing = FALSE), ]
+
+df_plot_genome <- data.frame("1"=nrow(cluster_in_genome[cluster_in_genome$genome_no==1,]),
+                              "2"=nrow(cluster_in_genome[cluster_in_genome$genome_no==2,]),
+                              "3"=nrow(cluster_in_genome[cluster_in_genome$genome_no==3,]),
+                              "4"=nrow(cluster_in_genome[cluster_in_genome$genome_no==4,]),
+                              "5"=nrow(cluster_in_genome[cluster_in_genome$genome_no==5,]),
+                              ">5"=nrow(cluster_in_genome[cluster_in_genome$genome_no>5,]),
+                              check.names = FALSE)
+df_plot_genome_t <- df_plot_genome %>% t() %>% as.data.frame()
+df_plot_genome_t$label <- rownames(df_plot_genome_t)
+df_plot_genome_t$label <- factor(df_plot_genome_t$label, c("1","2","3","4","5",">5"))
+
+p_genome <- ggplot(data=df_plot_genome_t, aes(x=label, y=V1)) +
+               geom_bar(stat="identity")+
+               #geom_text(aes(label = V1), vjust = 0)+
+               theme_base()+
+              ylab("Number of cluster")+
+              xlab("Number of different genomes")
+
+ggsave(filename = "Cluster_number_at_genome_level.pdf", plot = p_genome, useDingbats = FALSE, width = 5, height = 5)
+
+
+###########################################################################
+# BGC GCF vs. precursor cluster
+###########################################################################
+df_bgc_family_cluster <- df_summary_classII_f_c_ta[,c("bgcID","Cluster_re")]
+df_bgc_family_cluster$presence <- 1
+df_bgc_family_cluster_dcast <- reshape2::dcast(df_bgc_family_cluster, bgcID~Cluster_re, value.var = "presence")
+df_bgc_family_cluster_dcast[,2:ncol(df_bgc_family_cluster_dcast)][df_bgc_family_cluster_dcast[,2:ncol(df_bgc_family_cluster_dcast)]>0] <- 1
+write.table(df_bgc_family_cluster_dcast, file = "bgc_family_precursor_cluster.tsv", sep = "\t", row.names = FALSE, quote = FALSE)
+
+
+###########################################################################
+# accumulation curve
+###########################################################################
+df_genome_cluster <- df_summary_classII_f_c_ta[,c("Genome", "Cluster_re")]
+df_genome_cluster$presence <- 1
+df_genome_cluster_dcast <- reshape2::dcast(df_genome_cluster, Genome~Cluster_re, value.var = "presence")
+df_genome_cluster_dcast[df_genome_cluster_dcast>0] <- 1
+df_genome_cluster_dcast <- subset(df_genome_cluster_dcast, select = -Genome)
+
+sq <- specaccum(df_genome_cluster_dcast, method="random")
+save(sq, file = "sq.RData")
+
+pdf(file = "Accumulation_curve_205_clusters.pdf",height = 5, width = 5)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+plot(sq,
+      ci.type = 'polygon', # confidence intervals
+      col = 'blue',
+      lwd = 2,
+      las=1,
+      ci.lty = 0,
+      ci.col = 'lightblue',
+      xlab = "Number of genomes",
+      ylab = "Number of clusters")
+abline(h = 188, col = "red", lwd = 4, lty = 4)
+text(x=20000, y = 100, labels = "188", col="red")
+dev.off()
+```
+

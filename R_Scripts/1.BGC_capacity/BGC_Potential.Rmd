@@ -1,0 +1,436 @@
+---
+title: "BGC Potential"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# load libraries
+```{r}
+library(dplyr)
+library(stringr)
+library(openxlsx)
+library(vcd)
+library(ggplot2)
+library(ggthemes)
+library(ggsci)
+library(gg.gap)
+library(gridExtra)
+library(ggbreak)
+library(ggpubr)
+library(ggsignif)
+library(coin)
+```
+
+
+# load data
+```{r}
+# load gtdbtk taxonomic annotation
+taxo_1 <- read.delim2("02.gtdbtk_Taxonomy/refseq.re.tsv",colClasses = "character")[,c(1,2,21)]
+taxo_2 <- read.delim2("02.gtdbtk_Taxonomy/patric.re.tsv",colClasses = "character")[,c(1,2,21)]
+taxo_3 <- read.delim2("02.gtdbtk_Taxonomy/imgm_SGA.re.tsv",colClasses = "character")[,c(1,2,21)]
+taxo_4 <- read.delim2("02.gtdbtk_Taxonomy/imgm_MGA.re.tsv",colClasses = "character")[,c(1,2,21)]
+taxo_5 <- read.delim2("02.gtdbtk_Taxonomy/gut.re.tsv",colClasses = "character")[,c(1,2,21)]
+taxo_6 <- read.delim2("02.gtdbtk_Taxonomy/food.re.tsv",colClasses = "character")[,c(1,2,21)]
+
+taxo_1$user_genome <- gsub("LAB_","",taxo_1$user_genome, fixed = TRUE)
+taxo_1[,c("domain","phylum","class","order","family","genus","species")] <- str_split_fixed(taxo_1$classification, ";", 7)
+taxo_2[,c("domain","phylum","class","order","family","genus","species")] <- str_split_fixed(taxo_2$classification, ";", 7)
+taxo_3[,c("domain","phylum","class","order","family","genus","species")] <- str_split_fixed(taxo_3$classification, ";", 7)
+taxo_4[,c("domain","phylum","class","order","family","genus","species")] <- str_split_fixed(taxo_4$classification, ";", 7)
+taxo_5[,c("domain","phylum","class","order","family","genus","species")] <- str_split_fixed(taxo_5$classification, ";", 7)
+taxo_6[,c("domain","phylum","class","order","family","genus","species")] <- str_split_fixed(taxo_6$classification, ";", 7)
+
+# LAB genus list
+lab <- read.delim2("LAB_Genera.txt")
+lab_list <- lab$GTDB_taxonomy
+lab_list <- lab_list[!is.na(lab_list)]
+
+# load BGC genomes from filter 1
+dataset_1_list <- read.delim2("03.BGC_genome_list/filter_1.refseq.genome.list",header = F,colClasses = "character")
+dataset_2_list <- read.delim2("03.BGC_genome_list/filter_1.PATRIC.genome.list",header = F,colClasses = "character")
+dataset_3_list <- read.delim2("03.BGC_genome_list/filter_1.imgm_SGA.genome.list",header = F,colClasses = "character")
+dataset_4_list <- read.delim2("03.BGC_genome_list/filter_1.imgm_MGA.genome.list",header = F,colClasses = "character")
+dataset_5_list <- read.delim2("03.BGC_genome_list/filter_1.gut_SGA.genome.list",header = F,colClasses = "character")
+dataset_6_list <- read.delim2("03.BGC_genome_list/filter_1.gut_MGA.genome.list",header = F,colClasses = "character")
+dataset_7_list <- read.delim2("03.BGC_genome_list/filter_1.food.genome.list",header = F,colClasses = "character")
+
+# filter with taxonomy
+dataset_1_taxo <- merge(dataset_1_list, taxo_1, by.x = "V1", by.y = "user_genome", all.x = TRUE)
+dataset_2_taxo <- merge(dataset_2_list, taxo_2, by.x = "V1", by.y = "user_genome", all.x = TRUE)
+dataset_3_taxo <- merge(dataset_3_list, taxo_3, by.x = "V1", by.y = "user_genome", all.x = TRUE)
+dataset_4_taxo <- merge(dataset_4_list, taxo_4, by.x = "V1", by.y = "user_genome", all.x = TRUE)
+dataset_5_taxo <- merge(dataset_5_list, taxo_5, by.x = "V1", by.y = "user_genome", all.x = TRUE)
+dataset_6_taxo <- merge(dataset_6_list, taxo_5, by.x = "V1", by.y = "user_genome", all.x = TRUE)
+dataset_7_taxo <- merge(dataset_7_list, taxo_6, by.x = "V1", by.y = "user_genome", all.x = TRUE)
+
+# check genome number at filter 1
+nrow(dataset_1_taxo)
+nrow(dataset_2_taxo)
+nrow(dataset_3_taxo)
+nrow(dataset_4_taxo)
+nrow(dataset_5_taxo)
+nrow(dataset_6_taxo)
+nrow(dataset_7_taxo)
+
+# filter 2 with taxonomy
+dataset_1_taxo_f <- dataset_1_taxo %>% filter(genus %in% lab_list)
+dataset_2_taxo_f <- dataset_2_taxo %>% filter(genus %in% lab_list)
+dataset_3_taxo_f <- dataset_3_taxo %>% filter(genus %in% lab_list)
+dataset_4_taxo_f <- dataset_4_taxo %>% filter(genus %in% lab_list)
+dataset_5_taxo_f <- dataset_5_taxo %>% filter(genus %in% lab_list)
+dataset_6_taxo_f <- dataset_6_taxo %>% filter(genus %in% lab_list)
+dataset_7_taxo_f <- dataset_7_taxo %>% filter(genus %in% lab_list)
+# check genome number at filter 2
+nrow(dataset_1_taxo_f)
+nrow(dataset_2_taxo_f)
+nrow(dataset_3_taxo_f)
+nrow(dataset_4_taxo_f)
+nrow(dataset_5_taxo_f)
+nrow(dataset_6_taxo_f)
+nrow(dataset_7_taxo_f)
+
+# combine and print out
+dataset_1_taxo_f$label <- "dataset_1"
+dataset_1_taxo_f$genome_type <- "SAG"
+dataset_1_taxo_f$source <- "RefSeq"
+dataset_2_taxo_f$label <- "dataset_2"
+dataset_2_taxo_f$genome_type <- "SAG"
+dataset_2_taxo_f$source <- "PATRIC"
+dataset_3_taxo_f$label <- "dataset_3"
+dataset_3_taxo_f$genome_type <- "SAG"
+dataset_3_taxo_f$source <- "IMG/M"
+dataset_4_taxo_f$label <- "dataset_4"
+dataset_4_taxo_f$genome_type <- "MAG"
+dataset_4_taxo_f$source <- "IMG/M"
+dataset_5_taxo_f$label <- "dataset_5"
+dataset_5_taxo_f$genome_type <- "SAG"
+dataset_5_taxo_f$source <- "human_gut"
+dataset_6_taxo_f$label <- "dataset_6"
+dataset_6_taxo_f$genome_type <- "MAG"
+dataset_6_taxo_f$source <- "human_gut"
+dataset_7_taxo_f$label <- "dataset_7"
+dataset_7_taxo_f$genome_type <- "MAG"
+dataset_7_taxo_f$source <- "food"
+
+data_merge <- bind_rows(list(dataset_1_taxo_f,dataset_2_taxo_f,dataset_3_taxo_f,dataset_4_taxo_f,dataset_5_taxo_f,dataset_6_taxo_f,dataset_7_taxo_f))
+names(data_merge)[1] <- "Genome_accession"
+```
+
+
+# BGC number per genome
+```{r}
+n_dataset_1 <- read.delim2("01.BGC_Number/refseq.bgc.number.tsv",colClasses = "character")
+n_dataset_2 <- read.delim2("01.BGC_Number/patric.bgc.number.tsv",colClasses = "character")
+n_dataset_3 <- read.delim2("01.BGC_Number/img_m_isolates.bgc.number.tsv",colClasses = "character")
+n_dataset_4 <- read.delim2("01.BGC_Number/img_m_MGA.bgc.number.tsv",colClasses = "character")
+n_dataset_5 <- read.delim2("01.BGC_Number/humangut_isolates.bgc.number.tsv",colClasses = "character")
+n_dataset_6 <- read.delim2("01.BGC_Number/humangut_MGA.bgc.number.tsv",colClasses = "character")
+n_dataset_7 <- read.delim2("01.BGC_Number/food.bgc.number.tsv",colClasses = "character")
+
+n_dataset_1$Genome <- gsub(".*GCF","GCF",n_dataset_1$Genome)
+bgc_number <- bind_rows(list(n_dataset_1,n_dataset_2,n_dataset_3,n_dataset_4,n_dataset_5,n_dataset_6,n_dataset_7))
+names(bgc_number) <- c("Genome_accession", "BGC_number")
+data_merge_n <- merge(data_merge, bgc_number, by="Genome_accession", all.x = TRUE)
+names(data_merge_n)[names(data_merge_n)=="classification"] <- "gtdb_taxonomy"
+
+# total BGCs from SAG
+data_merge_n$BGC_number <- as.numeric(data_merge_n$BGC_number)
+sum(data_merge_n[data_merge_n$label=="dataset_1",]$BGC_number)
+sum(data_merge_n[data_merge_n$label=="dataset_2",]$BGC_number)
+sum(data_merge_n[data_merge_n$label=="dataset_3",]$BGC_number)
+sum(data_merge_n[data_merge_n$label=="dataset_4",]$BGC_number)
+sum(data_merge_n[data_merge_n$label=="dataset_5",]$BGC_number)
+sum(data_merge_n[data_merge_n$label=="dataset_6",]$BGC_number)
+sum(data_merge_n[data_merge_n$label=="dataset_7",]$BGC_number)
+sum(data_merge_n[data_merge_n$genome_type=="SAG",]$BGC_number)
+sum(data_merge_n[data_merge_n$genome_type=="MAG",]$BGC_number)
+# number of genomes containing >1 BGCs
+table(data_merge_n[data_merge_n$BGC_number>0,]$label)
+
+# genome and BGC number by source
+df_genome <- data_merge_n %>% group_by(source, genome_type) %>% count()
+df_genome <- as.data.frame(df_genome)
+names(df_genome) <- c("source","genome_type","number")
+df_genome$class <- "genome"
+df_bgc_number <- aggregate(BGC_number~ source+genome_type, data=data_merge_n, FUN=sum)
+names(df_bgc_number) <- c("source","genome_type","number")
+df_bgc_number$class <- "BGC"
+df_number_merge <- rbind(df_genome, df_bgc_number)
+df_number_merge$source <- factor(df_number_merge$source, levels = rev(c("RefSeq","PATRIC","human_gut","IMG/M","food")))
+df_number_merge$class <- factor(df_number_merge$class, levels = c("genome","BGC"))
+p <- ggplot(df_number_merge,aes(x=source,y=number,fill=genome_type))+
+        geom_bar(stat="identity")+
+        theme_bw()+
+        facet_grid(.~class, scales = "free_x")+
+        #scale_fill_igv()+
+        theme(axis.title = element_blank(),
+              axis.text = element_text(color = "black",size = 10),
+              strip.text = element_text(colour = "black", size = 13))+
+        coord_flip()
+ggsave(filename = "Number of genomes and BGCs.pdf",plot = p, useDingbats = FALSE, width = 6,height = 4)
+
+p1_1 <- ggplot(df_number_merge[df_number_merge$class=="genome",],aes(x=source,y=number,fill=genome_type))+
+        geom_col(orientation="source") + 
+        geom_bar(stat="identity")+
+        theme_bw()+
+        #scale_fill_igv()+
+        theme(axis.title = element_blank(),
+              axis.text = element_text(color = "black",size = 14))+
+        scale_y_break(c(5000, 20000)) + 
+        coord_flip()
+p1_2 <- ggplot(df_number_merge[df_number_merge$class=="BGC",],aes(x=source,y=number,fill=genome_type))+
+        geom_col(orientation="source") + 
+        geom_bar(stat="identity")+
+        theme_bw()+
+        #scale_fill_igv()+
+        theme(axis.title = element_blank(),
+              axis.text = element_text(color = "black",size = 14))+
+        scale_y_break(c(20000, 90000)) + 
+        coord_flip()
+ggsave(filename = "Genome counts.pdf",plot = p1_1, useDingbats = FALSE, width = 6,height = 6)
+ggsave(filename = "BGC counts.pdf",plot = p1_2, useDingbats = FALSE, width = 6,height = 6)
+
+
+# genome and BGC number by geneus
+bgc_number <- aggregate(BGC_number~ genus, data=data_merge_n, FUN=sum)
+genus_number <- as.data.frame(table(data_merge_n$genus))
+names(genus_number) <- c("genus","genome_number")
+bgc_genus <- merge(bgc_number, genus_number, by="genus")
+write.table(bgc_genus, file = "Overall_genome_BGC_number.tsv", quote = FALSE, sep="\t")
+
+bgc_genus$label <- paste(bgc_genus$genus," (",bgc_genus$genome_number,", ",bgc_genus$BGC_number,")",sep = "")
+genus <- unique(data_merge_n[,c("family","genus")])
+genus <- genus[order(genus$family,genus$genus),]
+indx <- factor(bgc_genus$genus, levels = genus$genus)
+bgc_genus <- bgc_genus[order(indx),]
+bgc_genus <- bgc_genus[]
+df_genome_g <- data_merge_n %>% group_by(genus, genome_type) %>% count()
+df_genome_g <- as.data.frame(df_genome_g)
+names(df_genome_g) <- c("genus","genome_type","number")
+df_genome_g$class <- "genome"
+df_bgc_number_g <- aggregate(BGC_number~ genus+genome_type, data=data_merge_n, FUN=sum)
+names(df_bgc_number_g) <- c("genus","genome_type","number")
+df_bgc_number_g$class <- "BGC"
+df_number_merge_g <- rbind(df_genome_g, df_bgc_number_g)
+df_number_merge_g_2 <- merge(df_number_merge_g, bgc_genus, by=c("genus"), all.x = TRUE)
+df_number_merge_g_2$label <- factor(df_number_merge_g_2$label, levels = rev(bgc_genus$label))
+df_number_merge_g_2$class <- factor(df_number_merge_g_2$class, levels = c("genome","BGC"))
+p2 <- ggplot(df_number_merge_g_2,aes(x=label,y=number,fill=genome_type))+
+        geom_bar(stat="identity")+
+        theme_bw()+
+        facet_grid(.~class, scales = "free_x")+
+        #scale_fill_igv()+
+        theme(axis.title = element_blank(),
+              axis.text = element_text(color = "black",size = 10),
+              strip.text = element_text(colour = "black", size = 13))+
+        coord_flip()
+ggsave(filename = "Number of genomes and BGCs.pdf",plot = p2, useDingbats = FALSE, width = 9,height = 9)
+```
+
+
+# GTDB representative LAB genomes
+```{r}
+gtdb_meta <- read.delim2("02.gtdbtk_Taxonomy/bac120_metadata_r202.tsv")
+gtdb_meta[,c("domain","phylum","class","order","family","genus","species")] <- str_split_fixed(gtdb_meta$gtdb_taxonomy, ";", 7)
+gtdb_meta_lab <- gtdb_meta %>% filter(genus %in% lab_list)
+gtdb_meta_lab_representative <- gtdb_meta_lab %>% filter(gtdb_representative=="t")
+write.table(gtdb_meta_lab_representative, file="gtdb_meta_lab_representative.tsv", sep="\t", quote = FALSE, row.names = FALSE)
+
+# select one representative genome (highest N50) for each genus
+genus_list <- unique(gtdb_meta_lab_representative$genus)
+representative_genome <- data.frame()
+for (x in genus_list) {
+  df_temp <- gtdb_meta_lab_representative %>% filter(genus==x)
+  genome_select <- df_temp[df_temp$n50_contigs==max(df_temp$n50_contigs),]$accession
+  df_temp_out <- data.frame(genus=x,
+                            representative_genome=genome_select)
+  representative_genome <- rbind(representative_genome,df_temp_out)
+}
+write.table(representative_genome, file="56_representative_genome_each_genus.tsv", sep="\t", quote = FALSE, row.names = FALSE)
+```
+
+
+# Compare BGC counts per genome between LAB and non-LAB
+```{r}
+# load RefSeq genomes, inputs for antismash
+refseq_in_list <- data.frame()
+for (file in grep("input", list.files("04.All_bacteria_RefSeq/"), value = TRUE)) {
+  in_list <- read.delim2(paste("04.All_bacteria_RefSeq/", file, sep = ""), header = FALSE, quote = "")
+  refseq_in_list <- rbind(refseq_in_list, in_list)
+}
+refseq_in_list$genome <- gsub(".+_GCF","GCF",refseq_in_list$V1)
+refseq_in_list$genome <- gsub(".gbff","",refseq_in_list$genome)
+refseq_in_list <- subset(refseq_in_list, select = -V1)
+# load BGC Counts from genomes with BGC no. > 0
+refseq_bgc_no <- data.frame()
+for (file in grep("bgc.number", list.files("04.All_bacteria_RefSeq/"), value = TRUE)) {
+  no_list <- read.delim2(paste("04.All_bacteria_RefSeq/", file, sep = ""), quote = "")
+  refseq_bgc_no <- rbind(refseq_bgc_no, no_list)
+}
+refseq_bgc_no$genome <- gsub(".+_GCF","GCF",refseq_bgc_no$Genome)
+refseq_bgc_no <- subset(refseq_bgc_no, select = -Genome)
+# merge
+df_refseq_bgc_no <- merge(refseq_in_list, refseq_bgc_no, by="genome", all.x = TRUE) 
+df_refseq_bgc_no$GBC_Number[is.na(df_refseq_bgc_no$GBC_Number)] <- 0
+# only select RefSeq genomes stored in GTDB
+gtdb_meta$genome <- substr(gtdb_meta$accession, 4, nchar(gtdb_meta$accession))
+gtdb_meta_refseq <- gtdb_meta %>% filter(grepl("GCF", gtdb_meta$genome, fixed = TRUE))
+gtdb_meta_refseq_nonLAB <- gtdb_meta_refseq[!(gtdb_meta_refseq$genus %in% lab_list),]
+gtdb_meta_refseq_nonLAB_m <- merge(gtdb_meta_refseq_nonLAB, df_refseq_bgc_no, by="genome", all = FALSE)
+write.table(gtdb_meta_refseq_nonLAB_m, file="164417_non_LAB_genomes_RefSeq_GTDB.tsv", quote = FALSE, row.names = FALSE, sep = "\t")
+
+non_LAB_BGC_median <- gtdb_meta_refseq_nonLAB_m %>% group_by(genus) %>% summarise(bgc_median=median(GBC_Number))
+non_LAB_len <- gtdb_meta_refseq_nonLAB_m %>% group_by(genus) %>% summarise(len_median=median(genome_size))
+summary_non_LAB <- merge(non_LAB_BGC_median, non_LAB_len, by="genus", all = TRUE)
+
+# load genome size for LAB
+g_l_1 <- read.delim2("05.Genome_size/RefSeq_length_GC_statistic.tsv")
+g_l_2 <- read.delim2("05.Genome_size/patric_length_GC_statistic.tsv")
+g_l_3 <- read.delim2("05.Genome_size/IMG_isolates_length_GC_statistic.tsv")
+g_l_4 <- read.delim2("05.Genome_size/IMG_meta_length_GC_statistic.tsv")
+g_l_5 <- read.delim2("05.Genome_size/human_gut_length_GC_statistic.tsv")
+g_l_6 <- read.delim2("05.Genome_size/food_length_GC_statistic.tsv")
+
+g_l_1$File <- gsub(".+_GCF","GCF",g_l_1$File)
+g_l_1$File <- gsub(".fna","",g_l_1$File, fixed = TRUE)
+g_l_2$File <- gsub(".fna","",g_l_2$File, fixed = TRUE)
+g_l_3$File <- gsub(".fna","",g_l_3$File, fixed = TRUE)
+g_l_4$File <- gsub(".fna","",g_l_4$File, fixed = TRUE)
+g_l_5$File <- gsub(".fasta","",g_l_5$File, fixed = TRUE)
+g_l_6$File <- gsub(".fna","",g_l_6$File, fixed = TRUE)
+
+genome_size_LAB <- bind_rows(list(g_l_1, g_l_2, g_l_3, g_l_4, g_l_5, g_l_6))
+data_merge_n_2 <- merge(data_merge_n, genome_size_LAB, by.x = "Genome_accession", by.y = "File", all.x = TRUE)
+write.table(data_merge_n_2, file = "taxonomy_31977_genomes_info.tsv", quote = FALSE, row.names = FALSE, sep = "\t")
+
+LAB_BGC_median <- data_merge_n_2 %>% filter(genome_type=="SAG") %>% group_by(genus) %>% summarise(bgc_median=median(BGC_number))
+LAB_len <- data_merge_n_2 %>% filter(genome_type=="SAG") %>% group_by(genus) %>% summarise(len_median=median(Length))
+summary_LAB <- merge(LAB_BGC_median, LAB_len, by="genus", all = TRUE)
+
+# compare LAB and non-LAB
+summary_non_LAB$type <- "non-LAB genus"
+summary_LAB$type <- "LAB genus"
+summary_m <- rbind(summary_non_LAB, summary_LAB)
+summary_m$len_Mb <- round(summary_m$len_median/1000000,2)
+summary_m <- summary_m[order(summary_m$len_Mb),]
+summary_m$genus <- factor(summary_m$genus, levels = summary_m$genus)
+sta <- cor.test(summary_m$bgc_median, summary_m$len_median, method="spearman", exact = FALSE)
+sta
+p <- ggplot(summary_m, aes(x=len_Mb, y=bgc_median)) + 
+      geom_point(aes(color=type), size=1.5)+
+      stat_smooth(method = "lm", formula = y ~ x, se = TRUE) +
+      geom_point(data = subset(summary_m, type == 'LAB genus'), aes(x = len_Mb, y = bgc_median, color = type), size=1.5) +
+      theme_base()+
+      xlab("Median of genome length (Mb)") +
+      ylab("Median of BGC number per genome")+
+      annotate(geom="text", x=5, y=50, label="rho = 0.712\npvalue < 0.001", colour="black", size=5)
+    
+p
+ggsave(filename = "All_bacteria_RefSeq_BGC_number_vs_genome_length.pdf", p, useDingbats = FALSE, width = 7,height = 5)
+
+all_non_LAB <- gtdb_meta_refseq_nonLAB_m %>% select(c(GBC_Number, genome_size))
+all_LAB <- data_merge_n_2 %>% filter(genome_type=="SAG") %>% select(BGC_number, Length)
+all_non_LAB$no_per_Mb <- all_non_LAB$GBC_Number*1000000/all_non_LAB$genome_size
+all_LAB$no_per_Mb <- all_LAB$BGC_number*1000000/all_LAB$Length
+all_non_LAB$type <- "non-LAB"
+all_LAB$type <- "LAB"
+df_rbind_all <- rbind(all_non_LAB[,c("type","no_per_Mb")], all_LAB[,c("type","no_per_Mb")])
+df_rbind_all$type <- factor(df_rbind_all$type, levels = c("LAB","non-LAB"))
+# Permutation test
+wilcox_test(no_per_Mb~type, data=df_rbind_all, distribution = approximate(nresample = 10000))
+
+p <-  ggplot(data=df_rbind_all, aes(x=type, y=no_per_Mb, fill=type)) +
+        geom_boxplot() +
+        geom_signif(comparisons = list(c("LAB", "non-LAB")),
+                    test = "wilcox.test",
+                    map_signif_level=TRUE)+
+        theme_base() +
+        ylab("BGC number per Mb") +
+        theme(legend.position="none",
+              axis.title.x = element_blank())
+ggsave(filename = "BGC_per_Mb.pdf", p, useDingbats = FALSE, width = 4,height = 5)
+```
+
+
+# statistics for iTOL input
+```{r}
+df_mag_sag_genome <- as.data.frame(table(data_merge_n$genus, data_merge_n$genome_type))
+df_mag_sag_genome_dcast <- reshape2::dcast(df_mag_sag_genome,Var1~Var2)
+
+df_mag_sag_bgc <- aggregate(BGC_number~genus+genome_type, data=data_merge_n, sum)
+df_mag_sag_bgc_dcast <- reshape2::dcast(df_mag_sag_bgc, genus~genome_type)
+df_mag_sag_bgc_dcast[is.na(df_mag_sag_bgc_dcast)] <- 0
+
+data_merge_n_2$len_Mb <- round(data_merge_n_2$Length/1000000, 2)
+data_merge_n_2$bgc_count_per_Mb <- round(data_merge_n_2$BGC_number*1000000/data_merge_n_2$Length,2)
+length_summary <- data_merge_n_2 %>% filter(genome_type=="SAG") %>% group_by(genus) %>% 
+                  summarise(mim=quantile(len_Mb)[1],Q1=quantile(len_Mb)[2],med=quantile(len_Mb)[3],Q3=quantile(len_Mb)[4],max=quantile(len_Mb)[5])
+bgc_summary <- data_merge_n_2 %>% filter(genome_type=="SAG") %>% group_by(genus) %>% 
+                  summarise(mim=quantile(BGC_number)[1],Q1=quantile(BGC_number)[2],med=quantile(BGC_number)[3],Q3=quantile(BGC_number)[4],max=quantile(BGC_number)[5])
+bgc_per_Mb_summary <- data_merge_n_2 %>% filter(genome_type=="SAG") %>% group_by(genus) %>% 
+                  summarise(mim=quantile(bgc_count_per_Mb)[1],Q1=quantile(bgc_count_per_Mb)[2],med=quantile(bgc_count_per_Mb)[3],Q3=quantile(bgc_count_per_Mb)[4],max=quantile(bgc_count_per_Mb)[5])
+
+write.table(df_mag_sag_genome_dcast,file = "06.iTOL/iTOL_df_mag_sag_genome_dcast.tsv", quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(df_mag_sag_bgc_dcast,file = "06.iTOL/iTOL_df_mag_sag_bgc_dcast.tsv", quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(length_summary,file = "06.iTOL/iTOL_length_summary.tsv", quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(bgc_summary,file = "06.iTOL/bgc_summary.tsv", quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(bgc_per_Mb_summary,file = "06.iTOL/bgc_per_Mb_summary.tsv", quote = FALSE, sep = "\t", row.names = FALSE)
+
+# remove outliers
+# combine SAG and MAG
+bgc_summary_del_outliers_overall <- data_merge_n_2 %>% group_by(genus) %>% 
+                            summarise(mim=boxplot.stats(BGC_number)$stats[1],Q1=boxplot.stats(BGC_number)$stats[2],med=boxplot.stats(BGC_number)$stats[3],Q3=boxplot.stats(BGC_number)$stats[4],max=boxplot.stats(BGC_number)$stats[5])
+write.table(bgc_summary_del_outliers_overall,file = "06.iTOL/bgc_summary_del_outliers_overall_.tsv", quote = FALSE, sep = "\t", row.names = FALSE)
+
+# only retain SAG
+length_summary_del_outlier <- data_merge_n_2 %>% filter(genome_type=="SAG") %>% group_by(genus) %>% 
+                              summarise(mim=boxplot.stats(len_Mb)$stats[1],Q1=boxplot.stats(len_Mb)$stats[2],med=boxplot.stats(len_Mb)$stats[3],Q3=boxplot.stats(len_Mb)$stats[4],max=boxplot.stats(len_Mb)$stats[5])
+bgc_summary_del_outliers <- data_merge_n_2 %>% filter(genome_type=="SAG") %>% group_by(genus) %>% 
+                            summarise(mim=boxplot.stats(BGC_number)$stats[1],Q1=boxplot.stats(BGC_number)$stats[2],med=boxplot.stats(BGC_number)$stats[3],Q3=boxplot.stats(BGC_number)$stats[4],max=boxplot.stats(BGC_number)$stats[5])
+write.table(length_summary_del_outlier,file = "06.iTOL/iTOL_length_summary_del_outliers_SAG.tsv", quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(bgc_summary_del_outliers,file = "06.iTOL/bgc_summary_del_outliers.tsv_SAG", quote = FALSE, sep = "\t", row.names = FALSE)
+```
+
+
+# BGC Count per genome vs. genome length among species
+```{r}
+df_species <- data_merge_n_2 %>% filter(genome_type=="SAG") %>% group_by(species) %>% summarise(length_median=quantile(len_Mb)[3],BGC_median=quantile(BGC_number)[3])
+df_species <- df_species[df_species$species != "s__",]
+df_species_family <- merge(df_species, as.data.frame(distinct(data_merge_n_2[,c("species","family")])), by="species", all.x = T)
+df_species_family <- df_species_family[order(df_species_family$length_median),]
+sta <- cor.test(df_species_family$length_median, df_species_family$BGC_median, method="spearman", exact = FALSE)
+sta
+p <- ggplot(df_species_family, aes(x=length_median, y=BGC_median, color=family)) + 
+      geom_point( size=1.5)+
+      # stat_smooth(method = "lm", formula = y ~ x, se = TRUE) +
+      theme_base()+
+      xlab("Median of genome length (Mb)") +
+      ylab("Median of BGC number per genome")+
+      scale_color_igv() +
+      stat_ellipse()
+      # annotate(geom="text", x=5, y=7.5, label="rho = 0.712\npvalue < 0.001", colour="black", size=5)
+    
+p
+write.table(df_species_family, file = "BGC_per_genome_Vs_Length (Figure S2).tsv", quote = FALSE, row.names = TRUE, sep = "\t")
+ggsave(filename = "BGC_number_vs_genome_length_species.pdf", p, useDingbats = FALSE, width = 8,height = 5)
+
+# show the species with a median BGC of >5
+df_species_family_f <- df_species_family[df_species_family$BGC_median>5,]
+df_species_family_f <- df_species_family_f[order(df_species_family_f$BGC_median, decreasing = TRUE),]
+species_select <- df_species_family_f$species
+df_species_select <- data_merge_n_2 %>% filter(species %in% species_select)
+df_species_select$species <- factor(df_species_select$species, levels = species_select)
+p2 <- ggplot(df_species_select, aes(x=species, y=BGC_number,fill=genus))+
+        geom_boxplot()+
+        theme_bw()+
+        theme(axis.title = element_blank(),
+              axis.text = element_text(color = "black",size = 10),
+              strip.text = element_text(colour = "black", size = 13))+
+        coord_flip()
+p2
+ggsave(filename = "Over_6_BGC_number_species.pdf", p2, useDingbats = FALSE, width = 10,height = 8)
+```

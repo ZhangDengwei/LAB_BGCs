@@ -1,0 +1,793 @@
+---
+title: "BGC profiling"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# load libraries
+```{r}
+library(dplyr)
+library(stringr)
+library(openxlsx)
+library(vcd)
+library(ggplot2)
+library(ggthemes)
+library(ggsci)
+library(gg.gap)
+library(gridExtra)
+library(ggbreak)
+library(ggpubr)
+library(ggsignif)
+library(coin)
+library(factoextra)
+library(pheatmap)
+library(ggridges)
+```
+
+# set global parameters
+```{r}
+print_table <- FALSE
+print_figure <- FALSE
+```
+
+
+# load dataset
+```{r}
+df_bgc_all <- read.delim2("01.BiGSLICE/bgc.csv", sep = ",")
+df_bgc <- df_bgc_all %>% filter(type != "mibig")
+names(df_bgc)[names(df_bgc)=="orig_folder"] <- "Genome"
+names(df_bgc)[names(df_bgc)=="orig_filename"] <- "GBK"
+# bgc Types
+type_1 <- read.delim2("02.BGC_Types/bgc_type_dataset_1.tsv", colClasses="character")
+type_2 <- read.delim2("02.BGC_Types/bgc_type_dataset_2.tsv", colClasses="character")
+type_3 <- read.delim2("02.BGC_Types/bgc_type_dataset_3.tsv", colClasses="character")
+type_4 <- read.delim2("02.BGC_Types/bgc_type_dataset_4.tsv", colClasses="character")
+type_5 <- read.delim2("02.BGC_Types/bgc_type_dataset_5.tsv", colClasses="character")
+type_6 <- read.delim2("02.BGC_Types/bgc_type_dataset_6.tsv", colClasses="character")
+type_7 <- read.delim2("02.BGC_Types/bgc_type_dataset_7.tsv", colClasses="character")
+type_all <- bind_rows(list(type_1,type_2,type_3,type_4,type_5,type_6,type_7))
+type_all <- subset(type_all, select = -c(GBK_Path, Cluster_number))
+# merge
+df_bgc_m <- merge(df_bgc, type_all, by=c("Genome", "GBK"), all.x = TRUE)
+# load BGC class
+bgc_class_re <- read.delim2("BGC_relassification.tsv", header = FALSE)
+names(bgc_class_re) <- c("Type", "BGC_Class")
+df_bgc_m_1 <- merge(df_bgc_m, bgc_class_re, by="Type", all.x = TRUE)
+# ripps_re <- read.delim2("RiPPs_relassification.txt")
+# glycocin and thiopeptide are grouped into Others because of small number
+ripps_re <- read.delim2("RiPPs_relassification.tsv")
+df_bgc_m_2 <- merge(df_bgc_m_1, ripps_re, by="Type", all.x = TRUE)
+# add genome info
+df_all_genome <- read.delim2("../01.BGC_Capacity/taxonomy_31977_genomes_info.tsv")
+df_bgc_m_3 <- merge(df_bgc_m_2, df_all_genome, by="Type", by.x="Genome", by.y="Genome_accession", all.x = TRUE)
+df_bgc_m_3 <- subset(df_bgc_m_3, select = -Length.x)
+names(df_bgc_m_3)[names(df_bgc_m_3)=="Length.y"] <- "genome_size"
+# Here, as T3PKS dominate PKS, it was emphasized particularly
+# regroup the BGC classes into five classes
+# For PKS, containing 25224 T3PKS vs. 54 other PKS, thus cluster 54 other PKS into "Others"
+# For PKS/NRPS Hybrids, number is 17, thus being clustered into "Others" as well
+df_bgc_m_3$BGC_Class_re <- NA
+for (i in 1:nrow(df_bgc_m_3)){
+  if (df_bgc_m_3$BGC_Class[i]=="NRPS"){df_bgc_m_3$BGC_Class_re[i] <- "NRPS"}
+  else if (df_bgc_m_3$BGC_Class[i]=="Others"){df_bgc_m_3$BGC_Class_re[i] <- "Others"}
+  else if (df_bgc_m_3$BGC_Class[i]=="RiPPs"){df_bgc_m_3$BGC_Class_re[i] <- "RiPPs"}
+  else if (df_bgc_m_3$BGC_Class[i]=="Terpene"){df_bgc_m_3$BGC_Class_re[i] <- "Terpene"}
+  else if (df_bgc_m_3$BGC_Class[i]=="PKS/NRPS Hybrids"){df_bgc_m_3$BGC_Class_re[i] <- "Others"}
+  else if (df_bgc_m_3$BGC_Class[i]=="PKS"){
+    if (df_bgc_m_3$Type[i]=="T3PKS"){df_bgc_m_3$BGC_Class_re[i] <- "T3PKS"}
+    else {df_bgc_m_3$BGC_Class_re[i] <- "Others"}}
+}
+if (print_table){
+  write.table(df_bgc_m_3, file = "All_130051_BGCs_info.tsv", sep = "\t", quote = FALSE, row.names = FALSE)
+}
+```
+
+
+# located on the edge
+```{r}
+df_complete <- xtabs(~ Contig_edge+genome_type, data=df_bgc_m_3[,c("Contig_edge","genome_type")])
+df_complete <- as.data.frame(df_complete, stringsAsFactors=FALSE)
+df_complete
+my_bar <- ggplot(df_complete, aes(x=genome_type, y=Freq, fill=Contig_edge)) +
+          geom_bar(stat ="identity",width = 0.6,position ="fill") +
+          scale_fill_manual(values = c("red","blue")) +
+          xlab("") + 
+          ylab("Percentage") + 
+          theme_base() + 
+          theme(axis.title = element_text(size = 14),
+                axis.text = element_text(size = 12))
+my_bar
+if (print_figure){
+  ggsave(filename = "Barplot_BGC_on_the_edge.pdf",plot = my_bar, useDingbats = FALSE, width = 4,height = 3)
+}
+```
+
+
+# Count for different BGC class
+```{r}
+# BGC count at genus level
+df_bgc_class_genus <- df_bgc_m_3 %>% select(c(BGC_Class_re, genus)) %>% table() %>% as.data.frame()
+df_bgc_class_genus_dcast <- reshape2::dcast(df_bgc_class_genus, genus~BGC_Class_re, value.var = "Freq")
+rownames(df_bgc_class_genus_dcast) <- df_bgc_class_genus_dcast$genus
+df_bgc_class_genus_dcast <- subset(df_bgc_class_genus_dcast,select = -genus)
+df_bgc_class_genus_dcast_prob <- df_bgc_class_genus_dcast / rowSums(df_bgc_class_genus_dcast)
+if (print_table){
+  write.table(df_bgc_class_genus_dcast, file="All_BGCs_Count_by_genus.tsv", sep = "\t", quote = FALSE, row.names = TRUE)
+  write.table(df_bgc_class_genus_dcast_prob, file="All_BGCs_Proportation_by_genus.tsv", sep = "\t", quote = FALSE, row.names = TRUE)
+}
+```
+
+
+# BGC distribution by BGC class
+```{r}
+# Overall
+genome_count_overall <- df_all_genome %>% group_by(genus) %>% count()
+names(genome_count_overall) <- c("genus", "genome_number")
+df_bgc_count_overall <- df_bgc_m_3 %>% select(c(BGC_Class_re, genus)) %>% table() %>% as.data.frame()
+df_bgc_count_overall_dcast <- reshape2::dcast(df_bgc_count_overall, genus~BGC_Class_re, value.var = "Freq")
+df_bgc_count_overall_dcast_genome <- merge(df_bgc_count_overall_dcast, genome_count_overall, by="genus", all.x = TRUE)
+rownames(df_bgc_count_overall_dcast_genome) <- df_bgc_count_overall_dcast_genome$genus
+df_bgc_count_overall_dcast_genome <- subset(df_bgc_count_overall_dcast_genome, select = -genus)
+df_bgc_count_overall_dcast_genome_prop <- df_bgc_count_overall_dcast_genome / df_bgc_count_overall_dcast_genome$genome_number
+if (print_table){
+  write.table(df_bgc_count_overall_dcast_genome, file="overall_BGCs_Counts_by_genus.tsv", sep = "\t", quote = FALSE, row.names = TRUE)
+  write.table(df_bgc_count_overall_dcast_genome_prop, file="overall_BGCs_Per_Genome_by_genus.tsv", sep = "\t", quote = FALSE, row.names = TRUE)
+}
+
+# SAG
+genome_count_SAG <- df_all_genome %>% filter(genome_type=="SAG") %>% group_by(genus) %>% count()
+names(genome_count_SAG) <- c("genus", "genome_number")
+df_bgc_count_SAG <- df_bgc_m_3 %>% filter(genome_type=="SAG") %>% select(c(BGC_Class_re, genus)) %>% table() %>% as.data.frame()
+df_bgc_count_SAG_dcast <- reshape2::dcast(df_bgc_count_SAG, genus~BGC_Class_re, value.var = "Freq")
+df_bgc_count_SAG_dcast_genome <- merge(df_bgc_count_SAG_dcast, genome_count_SAG, by="genus", all.x = TRUE)
+rownames(df_bgc_count_SAG_dcast_genome) <- df_bgc_count_SAG_dcast_genome$genus
+df_bgc_count_SAG_dcast_genome <- subset(df_bgc_count_SAG_dcast_genome, select = -genus)
+df_bgc_count_SAG_dcast_genome_prop <- df_bgc_count_SAG_dcast_genome / df_bgc_count_SAG_dcast_genome$genome_number
+if (print_table){
+  write.table(df_bgc_count_SAG_dcast_genome, file="SAG_BGCs_Counts_by_genus.tsv", sep = "\t", quote = FALSE, row.names = TRUE)
+  write.table(df_bgc_count_SAG_dcast_genome_prop, file="SAG_BGCs_Per_Genome_by_genus.tsv", sep = "\t", quote = FALSE, row.names = TRUE)
+}
+
+# MAG
+genome_count_MAG <- df_all_genome %>% filter(genome_type=="MAG") %>% group_by(genus) %>% count()
+names(genome_count_MAG) <- c("genus", "genome_number")
+df_bgc_count_MAG <- df_bgc_m_3 %>% filter(genome_type=="MAG") %>% select(c(BGC_Class_re, genus)) %>% table() %>% as.data.frame()
+df_bgc_count_MAG_dcast <- reshape2::dcast(df_bgc_count_MAG, genus~BGC_Class_re, value.var = "Freq")
+df_bgc_count_MAG_dcast_genome <- merge(df_bgc_count_MAG_dcast, genome_count_MAG, by="genus", all.x = TRUE)
+rownames(df_bgc_count_MAG_dcast_genome) <- df_bgc_count_MAG_dcast_genome$genus
+df_bgc_count_MAG_dcast_genome <- subset(df_bgc_count_MAG_dcast_genome, select = -genus)
+df_bgc_count_MAG_dcast_genome_prop <- df_bgc_count_MAG_dcast_genome / df_bgc_count_MAG_dcast_genome$genome_number
+if (print_table){
+  write.table(df_bgc_count_MAG_dcast_genome, file="MAG_BGCs_Counts_by_genus.tsv", sep = "\t", quote = FALSE, row.names = TRUE)
+  write.table(df_bgc_count_MAG_dcast_genome_prop, file="MAG_BGCs_Per_Genome_by_genus.tsv", sep = "\t", quote = FALSE, row.names = TRUE)
+}
+```
+
+
+# RiPPs distribution by BGC class
+```{r}
+# overall
+df_ripps_count_overall <- df_bgc_m_3 %>% filter(BGC_Class_re=="RiPPs") %>% select(c(RiPPs_Class, genus)) %>% table() %>% as.data.frame()
+df_ripps_count_overall_dcast <- reshape2::dcast(df_ripps_count_overall, genus~RiPPs_Class, value.var = "Freq")
+df_ripps_count_overall_dcast_genome <- merge(df_ripps_count_overall_dcast, genome_count_overall, by="genus", all.x = TRUE)
+rownames(df_ripps_count_overall_dcast_genome) <- df_ripps_count_overall_dcast_genome$genus
+df_ripps_count_overall_dcast_genome <- subset(df_ripps_count_overall_dcast_genome, select = -genus)
+df_ripps_count_overall_dcast_genome_prop <- df_ripps_count_overall_dcast_genome / df_ripps_count_overall_dcast_genome$genome_number
+if (print_table){
+  write.table(df_ripps_count_overall_dcast_genome, file="overall_RiPPs_Counts_by_genus.tsv", sep = "\t", quote = FALSE, row.names = TRUE)
+  write.table(df_ripps_count_overall_dcast_genome_prop, file="overall_RiPPs_Per_Genome_by_genus.tsv", sep = "\t", quote = FALSE, row.names = TRUE)
+}
+# SAG
+df_ripps_count_SAG <- df_bgc_m_3 %>% filter(genome_type=="SAG" & BGC_Class_re=="RiPPs") %>% select(c(RiPPs_Class, genus)) %>% table() %>% as.data.frame()
+df_ripps_count_SAG_dcast <- reshape2::dcast(df_ripps_count_SAG, genus~RiPPs_Class, value.var = "Freq")
+df_ripps_count_SAG_dcast_genome <- merge(df_ripps_count_SAG_dcast, genome_count_SAG, by="genus", all.x = TRUE)
+rownames(df_ripps_count_SAG_dcast_genome) <- df_ripps_count_SAG_dcast_genome$genus
+df_ripps_count_SAG_dcast_genome <- subset(df_ripps_count_SAG_dcast_genome, select = -genus)
+df_ripps_count_SAG_dcast_genome_prop <- df_ripps_count_SAG_dcast_genome / df_ripps_count_SAG_dcast_genome$genome_number
+if (print_table){
+  write.table(df_ripps_count_SAG_dcast_genome, file="SAG_RiPPs_Counts_by_genus.tsv", sep = "\t", quote = FALSE, row.names = TRUE)
+  write.table(df_ripps_count_SAG_dcast_genome_prop, file="SAG_RiPPs_Per_Genome_by_genus.tsv", sep = "\t", quote = FALSE, row.names = TRUE)
+}
+# MAG
+df_ripps_count_MAG <- df_bgc_m_3 %>% filter(genome_type=="MAG" & BGC_Class_re=="RiPPs") %>% select(c(RiPPs_Class, genus)) %>% table() %>% as.data.frame()
+df_ripps_count_MAG_dcast <- reshape2::dcast(df_ripps_count_MAG, genus~RiPPs_Class, value.var = "Freq")
+df_ripps_count_MAG_dcast_genome <- merge(df_ripps_count_MAG_dcast, genome_count_MAG, by="genus", all.x = TRUE)
+rownames(df_ripps_count_MAG_dcast_genome) <- df_ripps_count_MAG_dcast_genome$genus
+df_ripps_count_MAG_dcast_genome <- subset(df_ripps_count_MAG_dcast_genome, select = -genus)
+df_ripps_count_MAG_dcast_genome_prop <- df_ripps_count_MAG_dcast_genome / df_ripps_count_MAG_dcast_genome$genome_number
+if (print_table){
+  write.table(df_ripps_count_MAG_dcast_genome, file="MAG_RiPPs_Counts_by_genus.tsv", sep = "\t", quote = FALSE, row.names = TRUE)
+  write.table(df_ripps_count_MAG_dcast_genome_prop, file="MAG_RiPPs_Per_Genome_by_genus.tsv", sep = "\t", quote = FALSE, row.names = TRUE)
+}
+
+```
+
+
+# BGC proportation, prevalence, abundance
+```{r}
+pca <- prcomp(df_bgc_class_genus_dcast_prob, scale=T)
+fviz_eig(pca, addlabels = TRUE) 
+df_pca <- as.data.frame(pca$x)
+df_pca$id <- rownames(df_pca)
+df_pca_merge <- merge(df_pca, as.data.frame(distinct(df_bgc_m_3[,c("genus","family")])), by.x = "id", by.y="genus", all.x = TRUE)
+summ <- summary(pca)
+p <- ggplot(df_pca_merge,aes(x=PC1,y=PC2,color=family))+ 
+      geom_point()+
+      theme_bw()+
+      scale_color_igv()+
+      xlab(paste0("PC1 (",round(summ$importance[2,1]*100,2),"%)"))+
+      ylab(paste0("PC2 (",round(summ$importance[2,2]*100,2),"%)"))+
+      theme(axis.text = element_text(size = 14, colour = "black"),
+            axis.title = element_text(size = 16, colour = "black"))
+p
+# load reclassification 2
+re_class <- read.delim2("within_group_reclass.tsv", header = FALSE)
+names(re_class) <- c("Type", "BGC_Class_2")
+df_bgc_m_4 <- merge(df_bgc_m_3, re_class, by="Type", all.x = TRUE)
+df_bgc_count_detail <- df_bgc_m_4 %>% group_by(BGC_Class_2, BGC_Class, genome_type) %>% tally()
+df_bgc_count_detail_dcast <- reshape2::dcast(BGC_Class+BGC_Class_2~genome_type, data=df_bgc_count_detail, value.var = "n")
+df_bgc_count_detail_dcast[is.na(df_bgc_count_detail_dcast)] <- 0
+df_bgc_count_detail_dcast$sum <- NA
+for (i in 1:nrow(df_bgc_count_detail_dcast)){
+  df_bgc_count_detail_dcast$sum[i] <- sum(df_bgc_count_detail_dcast[i,3:4])
+}
+df_bgc_count_detail_dcast$label <- paste(df_bgc_count_detail_dcast$BGC_Class_2," (",df_bgc_count_detail_dcast$sum,")", sep = "")
+index <- c("NRPS", "PKS", "PKS/NRPS Hybrids", "Terpene", "RiPPs", "Others")
+df_bgc_count_detail_dcast$BGC_Class_re <- factor(df_bgc_count_detail_dcast$BGC_Class, levels = index)
+df_bgc_count_detail_dcast <- df_bgc_count_detail_dcast[order(df_bgc_count_detail_dcast$BGC_Class_re),]
+df_bgc_count_detail_dcast$MAG_log <- log10(df_bgc_count_detail_dcast$MAG)
+df_bgc_count_detail_dcast$SAG_log <- log10(df_bgc_count_detail_dcast$SAG)
+df_heatmap_bgc <- df_bgc_count_detail_dcast %>% select(c(label, MAG_log, SAG_log))
+rownames(df_heatmap_bgc) <- df_heatmap_bgc$label
+df_heatmap_bgc <- subset(df_heatmap_bgc, select = -label)
+df_heatmap_bgc$MAG_log[is.infinite(df_heatmap_bgc$MAG_log)] <- NA
+df_heatmap_bgc$SAG_log[is.infinite(df_heatmap_bgc$SAG_log)] <- NA
+if (print_figure){
+pdf(file = "BGC_Counts.pdf",,height = 12, width = 8)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+pheatmap(as.matrix(df_heatmap_bgc),
+        color = colorRampPalette(c("navy", "white", "firebrick3"))(50),
+        cellwidth = 100,cellheight = 40,
+        cluster_rows = FALSE, cluster_cols = FALSE,
+        #legend_breaks = c(0, 1, 2, 3, 4, 5, max(df_heatmap_bgc)),
+        #legend_labels = c("0","1","2","3","4","5","log10(BGC number)\n"),
+        fontsize_row = 14, fontsize_col = 14)
+dev.off()
+}
+
+# BGC proportation for each genome
+df_bgc_p <- table(df_bgc_m_4$Genome, df_bgc_m_4$BGC_Class_re) %>% as.data.frame()
+df_bgc_p_dcast <- reshape2::dcast(Var1~Var2, data = df_bgc_p, value.var = "Freq")
+rownames(df_bgc_p_dcast) <- df_bgc_p_dcast$Var1
+df_bgc_p_dcast <- subset(df_bgc_p_dcast, select = -Var1)
+
+df_bgc_p_dcast_prop <- df_bgc_p_dcast/rowSums(df_bgc_p_dcast)
+df_bgc_p_dcast_prop$Genome <- rownames(df_bgc_p_dcast_prop)
+df_bgc_p_dcast_prop_melt <- reshape2::melt(data = df_bgc_p_dcast_prop, id="Genome")
+df_bgc_p_dcast_prop_melt$variable <- factor(df_bgc_p_dcast_prop_melt$variable, levels = rev(c("NRPS","T3PKS","Terpene","RiPPs","Others")))
+
+df_bgc_p_dcast$Genome <- row.names(df_bgc_p_dcast)
+df_bgc_p_dcast_melt <- reshape2::melt(data = df_bgc_p_dcast, id="Genome")
+df_bgc_p_dcast_melt$variable <- factor(df_bgc_p_dcast_melt$variable, levels = rev(c("NRPS","T3PKS","Terpene","RiPPs","Others")))
+
+df_1 <- df_bgc_p_dcast_prop_melt
+df_1$type <- "Proportion"
+df_2 <- df_bgc_p_dcast_melt
+df_2$type <- "Count"
+df_m <- bind_rows(df_1, df_2)
+
+p <- ggplot(df_m , aes(x = value, y = variable, fill = variable)) +
+        geom_density_ridges(scale = 0.5) +
+        facet_wrap(~ type, scales = "free_x")+
+        theme_bw() + 
+        theme(legend.position = "none") +
+        ylab("")+
+        xlab("")+
+        theme(axis.text = element_text(colour = "black", size = 12),
+              axis.title.x = element_text(colour = "black", size = 14))
+
+if (print_figure){
+  ggsave(filename = "Distribution_of_BGC_Proporion_or_Count.pdf",plot = p, useDingbats = FALSE, width = 10,height = 4)
+}
+# BGC proportion at genus level
+## BGC count per genome
+df_bgc_p_dcast_taxo <- merge(df_bgc_p_dcast, df_bgc_m_3[,c("Genome","family","genus","genome_type")], by="Genome", all.x = TRUE) %>% distinct() %>% as.data.frame()
+df_bgc_p_dcast_taxo_SAG <- df_bgc_p_dcast_taxo %>% filter(genome_type=="SAG")
+genus_no <- table(as.data.frame(distinct(df_bgc_p_dcast_taxo_SAG[,c("Genome","genus")]))$genus) %>% as.data.frame()
+genus_no$label <- paste(genus_no$Var1, " (n=", genus_no$Freq, ")", sep = "")
+genus_no_m <- merge(genus_no, as.data.frame(distinct(df_bgc_m_3[,c("family","genus")])), by.x = "Var1", by.y = "genus", all.x = TRUE)
+genus_no_m <- genus_no_m[order(genus_no_m$family),]
+
+df_bgc_count_genus_SAG <- data.frame()
+for (i in genus_no$Var1){
+  df_bgc_p_dcast_taxo_SAG_select <- df_bgc_p_dcast_taxo_SAG %>% filter(genus==i)
+  tmp_median <- apply(df_bgc_p_dcast_taxo_SAG_select[,2:6], 2, median) %>% t() %>% as.data.frame()
+  rownames(tmp_median) <- i
+  df_bgc_count_genus_SAG <- rbind(df_bgc_count_genus_SAG, tmp_median)
+}
+df_bgc_count_genus_SAG$genus <- rownames(df_bgc_count_genus_SAG)
+df_bgc_count_genus_SAG_melt <- reshape2::melt(df_bgc_count_genus_SAG, id="genus")
+df_bgc_count_genus_SAG_melt_m <- merge(df_bgc_count_genus_SAG_melt, genus_no, by.x="genus", by.y = "Var1", all.x=TRUE)
+index <- distinct(df_bgc_count_genus_SAG_melt_m[,c("genus","label")]) %>% as.data.frame()
+index$genus <- factor(index$genus, levels = genus_no_m$Var1)
+index <- index[order(index$genus),]
+df_bgc_count_genus_SAG_melt_m$label <- factor(df_bgc_count_genus_SAG_melt_m$label, levels = rev(index$label))
+p1 <- ggplot(data=df_bgc_count_genus_SAG_melt_m, mapping=aes(x=label, y=value, group=variable))+
+        geom_point(aes(color=variable))+
+        scale_color_igv()+
+        coord_flip() +
+        theme_bw()+
+        xlab("Genus") +
+        ylab("Median of BGC count per SAG")
+# df_bgc_p_dcast_taxo_SAG_melt <- reshape2::melt(df_bgc_p_dcast_taxo_SAG[,c(2:8,10)], id="genus") 
+# df_bgc_p_dcast_taxo_SAG_melt_m <- merge(df_bgc_p_dcast_taxo_SAG_melt, genus_no, by.x="genus", by.y = "Var1", all.x=TRUE)
+# p2 <- ggplot(data=df_bgc_p_dcast_taxo_SAG_melt_m, aes(x=value, group=variable, fill=variable)) +
+#       geom_density(adjust=1.5, alpha=.4) +
+#       facet_wrap(label~., scales = "free") +
+#       scale_fill_igv()
+## BGC proportion per genome
+df_bgc_p_dcast_taxo_prop <- merge(df_bgc_p_dcast_prop, df_bgc_m_3[,c("Genome","family","genus","genome_type")], by="Genome", all.x = TRUE) %>% distinct() %>% as.data.frame()
+df_bgc_p_dcast_taxo_prop_SAG <- df_bgc_p_dcast_taxo_prop %>% filter(genome_type=="SAG")
+df_bgc_prop_genus_SAG <- data.frame()
+
+for (i in genus_no$Var1){
+  df_bgc_p_dcast_taxo_prop_SAG_select <- df_bgc_p_dcast_taxo_prop_SAG %>% filter(genus==i)
+  tmp_median <- apply(df_bgc_p_dcast_taxo_prop_SAG_select[,2:6], 2, median) %>% t() %>% as.data.frame()
+  rownames(tmp_median) <- i
+  df_bgc_prop_genus_SAG <- rbind(df_bgc_prop_genus_SAG, tmp_median)
+}
+df_bgc_prop_genus_SAG$genus <- rownames(df_bgc_prop_genus_SAG)
+df_bgc_prop_genus_SAG_melt <- reshape2::melt(df_bgc_prop_genus_SAG, id="genus")
+df_bgc_prop_genus_SAG_melt_m <- merge(df_bgc_prop_genus_SAG_melt, genus_no, by.x="genus", by.y = "Var1", all.x=TRUE)
+df_bgc_prop_genus_SAG_melt_m$label <- factor(df_bgc_prop_genus_SAG_melt_m$label, levels = rev(index$label))
+p2 <- ggplot(data=df_bgc_prop_genus_SAG_melt_m, mapping=aes(x=label, y=value, group=variable))+
+        geom_point(aes(color=variable))+
+        scale_color_igv()+
+        coord_flip() +
+        theme_bw()+
+        xlab("Genus") +
+        ylab("Median of BGC propotion")
+
+df_bgc_count_genus_SAG_melt_m$type <- "Count"
+df_bgc_prop_genus_SAG_melt_m$type <- "Proportion"
+df_summay_temp <- rbind(df_bgc_count_genus_SAG_melt_m, df_bgc_prop_genus_SAG_melt_m)
+df_summay_temp$variable <- factor(df_summay_temp$variable, levels = c("NRPS", "T3PKS", "Terpene", "RiPPs", "Others"))
+cols <- c("#d7a48e", "#E2E653", "#295b39", "#ac463b", "#4d443b")
+p <- ggplot(data=df_summay_temp, mapping=aes(x=label, y=value, group=variable))+
+        geom_point(aes(color=variable))+
+        scale_color_manual(values = cols) +
+        coord_flip() +
+        theme_bw()+
+        xlab("Genus") +
+        ylab("Median") +
+        facet_wrap(~ type, scales = "free_x")
+if (print_figure){
+  ggsave(filename = "Distribution_of_BGC_Proporion_or_Count_at_genus_level.pdf",plot = p, useDingbats = FALSE, width = 9,height = 8)
+}
+if (print_table){
+  write.table(df_summay_temp, file = "Table_Distribution_of_BGC_Proporion_or_Count_at_genus_level.tsv", sep = "\t", quote = FALSE, row.names = FALSE)
+}
+
+# BGC prevalence
+df_bgc_prevalence <- df_bgc_m_4 %>% select(c(BGC_Class_re, Genome)) %>% distinct() %>% as.data.frame() 
+df_bgc_prevalence_1 <- table(df_bgc_prevalence$BGC_Class_re) %>% as.data.frame()
+df_bgc_prevalence_1$all_genome <- 31977
+df_bgc_prevalence_1$prevalence <- round(df_bgc_prevalence_1$Freq / df_bgc_prevalence_1$all_genome *100, 2)
+
+# RiPPs profile in SAGs
+
+# df_SAGs_RiPPs <- df_bgc_m_4 %>% filter(BGC_Class_re=="RiPPs" & genome_type=="SAG") 
+# df_SAGs_RiPPs_p <- table(df_SAGs_RiPPs$Genome, df_SAGs_RiPPs$RiPPs_Class) %>% as.data.frame()
+# df_SAGs_RiPPs_p_dcast <- reshape2::dcast(Var1~Var2, data = df_SAGs_RiPPs_p, value.var = "Freq") %>% distinct()
+# rownames(df_SAGs_RiPPs_p_dcast) <- df_SAGs_RiPPs_p_dcast$Var1
+# df_SAGs_RiPPs_p_dcast <- subset(df_SAGs_RiPPs_p_dcast, select = -Var1)
+# df_SAGs_RiPPs_p_dcast_prop <- df_SAGs_RiPPs_p_dcast/rowSums(df_SAGs_RiPPs_p_dcast)
+# df_SAGs_RiPPs_p_dcast$Genome <- rownames(df_SAGs_RiPPs_p_dcast)
+# df_SAGs_RiPPs_p_dcast_taxo <- merge(df_SAGs_RiPPs_p_dcast, as.data.frame(distinct(df_bgc_m_4[,c("Genome","genus","family")])), by="Genome", all.x = TRUE)
+
+df_SAGs <- df_bgc_m_4 %>% filter(BGC_Class_re=="RiPPs" & genome_type=="SAG") 
+df_SAGs_RiPPs_p <- table(df_SAGs$Genome, df_SAGs$RiPPs_Class) %>% as.data.frame()
+df_SAGs_RiPPs_p_dcast <- reshape2::dcast(Var1~Var2, data = df_SAGs_RiPPs_p, value.var = "Freq") %>% distinct()
+names(df_SAGs_RiPPs_p_dcast)[names(df_SAGs_RiPPs_p_dcast)=="Var1"] <- "Genome"
+df_SAGs_RiPPs_p_dcast_taxo <- merge(df_SAGs_RiPPs_p_dcast, as.data.frame(distinct(df_bgc_m_4[,c("Genome","genus","family")])), by="Genome", all.x = TRUE)
+
+SAGs_RiPPs_genome_no <- table(df_SAGs_RiPPs_p_dcast_taxo$genus) %>% as.data.frame()
+names(SAGs_RiPPs_genome_no) <- c("genus", "genome_count")
+SAGs_RiPPs_genome_no$label <- paste(SAGs_RiPPs_genome_no$genus, " (n=", SAGs_RiPPs_genome_no$genome_count, ")", sep = "")
+SAGs_RiPPs_genome_no_m <- merge(SAGs_RiPPs_genome_no, as.data.frame(distinct(df_bgc_m_4[,c("genus","family")])), by="genus", all.x = TRUE)
+SAGs_RiPPs_genome_no_m <- SAGs_RiPPs_genome_no_m[order(SAGs_RiPPs_genome_no_m$family),]
+
+df_SAGs_RiPPs_p_summary <- data.frame()
+for (i in unique(df_SAGs_RiPPs_p_dcast_taxo$genus)){
+  df_SAGs_RiPPs_p_dcast_taxo_select <- df_SAGs_RiPPs_p_dcast_taxo %>% filter(genus==i)
+  tmp_median <- apply(df_SAGs_RiPPs_p_dcast_taxo_select[,2:9], 2, median) %>% t() %>% as.data.frame()
+  rownames(tmp_median) <- SAGs_RiPPs_genome_no[SAGs_RiPPs_genome_no$genus==i,]$label
+  df_SAGs_RiPPs_p_summary <- rbind(df_SAGs_RiPPs_p_summary, tmp_median)
+}
+index_ripps <- c("cyclic-lactone-autoinducer","lanthipeptide","LAP","lassopeptide","RiPP-like","RRE-containing","rSAM-Modified","Others")
+df_SAGs_RiPPs_p_summary <- df_SAGs_RiPPs_p_summary[SAGs_RiPPs_genome_no_m$label, index_ripps]
+if (print_figure){
+pdf(file = "Median_RiPP_Counts_Per_Genome.pdf",,height = 12, width = 8)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+pheatmap(df_SAGs_RiPPs_p_summary,
+              color = colorRampPalette(c("navy", "white", "firebrick3"))(50),
+              cellwidth = 40,cellheight = 15,
+              cluster_rows = FALSE, cluster_cols = FALSE, angle_col = 45,
+              #legend_breaks = c(0, 1, 2, 3, 4, max(df_tmp_s_m_matrix)),
+              #legend_labels = c("0","1","2","3","4","log10(BGC number)\n"),
+              fontsize_row = 14, fontsize_col = 14)
+dev.off()
+}
+# df_SAGs_RiPPs_p_dcast_prop$Genome <- rownames(df_SAGs_RiPPs_p_dcast_prop)
+# df_SAGs_RiPPs_p_dcast_prop_taxo <- merge(df_SAGs_RiPPs_p_dcast_prop, as.data.frame(distinct(df_bgc_m_4[,c("Genome","genus","family")])), by="Genome", all.x = TRUE)
+# df_SAGs_RiPPs_p_summary_prop <- data.frame()
+# for (i in unique(df_SAGs_RiPPs_p_dcast_prop_taxo$genus)){
+#   df_SAGs_RiPPs_p_dcast_prop_taxo_select <- df_SAGs_RiPPs_p_dcast_prop_taxo %>% filter(genus==i)
+#   tmp_median <- apply(df_SAGs_RiPPs_p_dcast_prop_taxo_select[,2:11], 2, median) %>% t() %>% as.data.frame()
+#   rownames(tmp_median) <- SAGs_RiPPs_genome_no[SAGs_RiPPs_genome_no$genus==i,]$label
+#   df_SAGs_RiPPs_p_summary_prop <- rbind(df_SAGs_RiPPs_p_summary_prop, tmp_median)
+# }
+# df_SAGs_RiPPs_p_summary_prop <- df_SAGs_RiPPs_p_summary_prop[SAGs_RiPPs_genome_no_m$label, index_ripps]
+# if (print_figure){
+# pdf(file = "figures_S5_Median_RiPP_Proportion_Per_Genome.pdf",,height = 12, width = 8)
+# par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+# pheatmap(df_SAGs_RiPPs_p_summary_prop ,
+#               color = colorRampPalette(c("navy", "white", "firebrick3"))(50),
+#               cellwidth = 40,cellheight = 15,
+#               cluster_rows = FALSE, cluster_cols = FALSE, angle_col = 45,
+#               #legend_breaks = c(0, 1, 2, 3, 4, max(df_tmp_s_m_matrix)),
+#               #legend_labels = c("0","1","2","3","4","log10(BGC number)\n"),
+#               fontsize_row = 14, fontsize_col = 14)
+# dev.off()
+# }
+
+
+#############################################################################################
+# BGC profile in 16 genera containing > 100 genomes, using Bootstrap with 1000 times
+#############################################################################################
+# BGC Count
+genus_select <- genus_no[genus_no$Freq>100,]$Var1
+df_all_count_list <- list()
+set.seed(123)
+for (repeate in 1:1000){
+  df_BGC_tmp <- data.frame()
+  for (i in genus_select){
+    # fetch out 50% genome
+    df_one_genus_BGCs <- df_bgc_p_dcast_taxo_SAG %>% filter(genus==i)
+    genome_fetch <- sample(df_one_genus_BGCs$Genome, size=nrow(df_one_genus_BGCs)/2, replace=F)
+    genome_no <- length(genome_fetch)
+    df_select <- df_one_genus_BGCs[df_one_genus_BGCs$Genome %in% genome_fetch,]
+    df_bgc_type_mean_count <- as.data.frame(colSums(df_select[,2:6]) / nrow(df_select)) %>% t() %>% data.frame(check.names=FALSE)
+    rownames(df_bgc_type_mean_count) <- i
+    df_BGC_tmp <- rbind(df_BGC_tmp, df_bgc_type_mean_count)
+  }
+  df_all_count_list[[repeate]] <- df_BGC_tmp
+}
+df_count_mean_plot <- data.frame()
+df_count_sd_plot <- data.frame()
+for (bgc_type in names(df_bgc_p_dcast_taxo_SAG)[2:6]){
+  v_g__Enterococcus <- vector(length = length(df_all_count_list))
+  v_g__Enterococcus_B <- vector(length = length(df_all_count_list))
+  v_g__Lacticaseibacillus <- vector(length = length(df_all_count_list))
+  v_g__Lactiplantibacillus <- vector(length = length(df_all_count_list))
+  v_g__Lactobacillus <- vector(length = length(df_all_count_list))
+  v_g__Lactococcus <- vector(length = length(df_all_count_list))
+  v_g__Leuconostoc <- vector(length = length(df_all_count_list))
+  v_g__Ligilactobacillus <- vector(length = length(df_all_count_list))
+  v_g__Limosilactobacillus <- vector(length = length(df_all_count_list))
+  v_g__Oenococcus <- vector(length = length(df_all_count_list))
+  v_g__Streptococcus <- vector(length = length(df_all_count_list))
+  v_g__Enterococcus_D <- vector(length = length(df_all_count_list))
+  v_g__Lentilactobacillus <- vector(length = length(df_all_count_list))
+  v_g__Levilactobacillus <- vector(length = length(df_all_count_list))
+  v_g__Pediococcus <- vector(length = length(df_all_count_list))
+  v_g__Weissella <- vector(length = length(df_all_count_list))
+  for (i in 1:length(df_all_count_list)){
+    v_g__Enterococcus[i] <- df_all_count_list[[i]]["g__Enterococcus", bgc_type]
+    v_g__Enterococcus_B[i] <- df_all_count_list[[i]]["g__Enterococcus_B", bgc_type]
+    v_g__Lacticaseibacillus[i] <- df_all_count_list[[i]]["g__Lacticaseibacillus", bgc_type]
+    v_g__Lactiplantibacillus[i] <- df_all_count_list[[i]]["g__Lactiplantibacillus", bgc_type]
+    v_g__Lactobacillus[i] <- df_all_count_list[[i]]["g__Lactobacillus", bgc_type]
+    v_g__Lactococcus[i] <- df_all_count_list[[i]]["g__Lactococcus", bgc_type]
+    v_g__Leuconostoc[i] <- df_all_count_list[[i]]["g__Leuconostoc", bgc_type]
+    v_g__Ligilactobacillus[i] <- df_all_count_list[[i]]["g__Ligilactobacillus", bgc_type]
+    v_g__Limosilactobacillus[i] <- df_all_count_list[[i]]["g__Limosilactobacillus", bgc_type]
+    v_g__Oenococcus[i] <- df_all_count_list[[i]]["g__Oenococcus", bgc_type]
+    v_g__Streptococcus[i] <- df_all_count_list[[i]]["g__Streptococcus", bgc_type]
+    v_g__Enterococcus_D[i] <- df_all_count_list[[i]]["g__Enterococcus_D", bgc_type]
+    v_g__Lentilactobacillus[i] <- df_all_count_list[[i]]["g__Lentilactobacillu", bgc_type]
+    v_g__Levilactobacillus[i] <- df_all_count_list[[i]]["g__Levilactobacillus", bgc_type]
+    v_g__Pediococcus[i] <- df_all_count_list[[i]]["g__Pediococcus", bgc_type]
+    v_g__Weissella[i] <- df_all_count_list[[i]]["g__Weissella", bgc_type]
+  }
+  df_count_mean_plot["g__Enterococcus",bgc_type] <- mean(v_g__Enterococcus)
+  df_count_mean_plot["g__Enterococcus_B",bgc_type] <- mean(v_g__Enterococcus_B)
+  df_count_mean_plot["g__Lacticaseibacillus",bgc_type] <- mean(v_g__Lacticaseibacillus)
+  df_count_mean_plot["g__Lactiplantibacillus",bgc_type] <- mean(v_g__Lactiplantibacillus)
+  df_count_mean_plot["g__Lactobacillus",bgc_type] <- mean(v_g__Lactobacillus)
+  df_count_mean_plot["g__Lactococcus",bgc_type] <- mean(v_g__Lactococcus)
+  df_count_mean_plot["g__Leuconostoc",bgc_type] <- mean(v_g__Leuconostoc)
+  df_count_mean_plot["g__Ligilactobacillus",bgc_type] <- mean(v_g__Ligilactobacillus)
+  df_count_mean_plot["g__Limosilactobacillus",bgc_type] <- mean(v_g__Limosilactobacillus)
+  df_count_mean_plot["g__Oenococcus",bgc_type] <- mean(v_g__Oenococcus)
+  df_count_mean_plot["g__Streptococcus",bgc_type] <- mean(v_g__Streptococcus)
+  df_count_mean_plot["g__Enterococcus_D",bgc_type] <- mean(v_g__Enterococcus_D)
+  df_count_mean_plot["g__Lentilactobacillus",bgc_type] <- mean(v_g__Lentilactobacillus)
+  df_count_mean_plot["g__Levilactobacillus",bgc_type] <- mean(v_g__Levilactobacillus)
+  df_count_mean_plot["g__Pediococcus",bgc_type] <- mean(v_g__Pediococcus)
+  df_count_mean_plot["g__Weissella",bgc_type] <- mean(v_g__Weissella)
+  
+  df_count_sd_plot["g__Enterococcus",bgc_type] <- sd(v_g__Enterococcus)
+  df_count_sd_plot["g__Enterococcus_B",bgc_type] <- sd(v_g__Enterococcus_B)
+  df_count_sd_plot["g__Lacticaseibacillus",bgc_type] <- sd(v_g__Lacticaseibacillus)
+  df_count_sd_plot["g__Lactiplantibacillus",bgc_type] <- sd(v_g__Lactiplantibacillus)
+  df_count_sd_plot["g__Lactobacillus",bgc_type] <- sd(v_g__Lactobacillus)
+  df_count_sd_plot["g__Lactococcus",bgc_type] <- sd(v_g__Lactococcus)
+  df_count_sd_plot["g__Leuconostoc",bgc_type] <- sd(v_g__Leuconostoc)
+  df_count_sd_plot["g__Ligilactobacillus",bgc_type] <- sd(v_g__Ligilactobacillus)
+  df_count_sd_plot["g__Limosilactobacillus",bgc_type] <- sd(v_g__Limosilactobacillus)
+  df_count_sd_plot["g__Oenococcus",bgc_type] <- sd(v_g__Oenococcus)
+  df_count_sd_plot["g__Streptococcus",bgc_type] <- sd(v_g__Streptococcus)
+  df_count_sd_plot["g__Enterococcus_D",bgc_type] <- sd(v_g__Enterococcus_D)
+  df_count_sd_plot["g__Lentilactobacillus",bgc_type] <- sd(v_g__Lentilactobacillus)
+  df_count_sd_plot["g__Levilactobacillus",bgc_type] <- sd(v_g__Levilactobacillus)
+  df_count_sd_plot["g__Pediococcus",bgc_type] <- sd(v_g__Pediococcus)
+  df_count_sd_plot["g__Weissella",bgc_type] <- sd(v_g__Weissella)
+}
+df_count_mean_plot$genus <- rownames(df_count_mean_plot)
+df_count_mean_plot_melt <- reshape2::melt(df_count_mean_plot, id="genus")
+names(df_count_mean_plot_melt) <- c("genus", "Class", "Mean")
+df_count_sd_plot$genus <- rownames(df_count_sd_plot)
+df_count_sd_plot_melt <- reshape2::melt(df_count_sd_plot, id="genus")
+names(df_count_sd_plot_melt) <- c("genus", "Class", "SD")
+df_plot <- merge(df_count_mean_plot_melt, df_count_sd_plot_melt, by=c("genus", "Class"))
+df_plot_m <- merge(df_plot, genus_no, by.x = "genus", by.y = "Var1", all.x = TRUE)
+bgc_class_order <-  c("NRPS", "T3PKS", "Terpene", "RiPPs", "Others")
+df_plot_m$Class <- factor(df_plot_m$Class, levels = bgc_class_order)
+
+# BGC proportion
+df_all_prop_list <- list()
+set.seed(123)
+for (repeate in 1:1000){
+  df_BGC_tmp <- data.frame()
+  for (i in genus_select){
+    # fetch out 50% genome
+    df_one_genus_BGCs <- df_bgc_p_dcast_taxo_prop_SAG %>% filter(genus==i)
+    genome_fetch <- sample(df_one_genus_BGCs$Genome, size=nrow(df_one_genus_BGCs)/2, replace=F)
+    genome_no <- length(genome_fetch)
+    df_select <- df_one_genus_BGCs[df_one_genus_BGCs$Genome %in% genome_fetch,]
+    df_bgc_type_mean_count <- as.data.frame(colSums(df_select[,2:6]) / nrow(df_select)) %>% t() %>% data.frame(check.names=FALSE)
+    rownames(df_bgc_type_mean_count) <- i
+    df_BGC_tmp <- rbind(df_BGC_tmp, df_bgc_type_mean_count)
+  }
+  df_all_prop_list[[repeate]] <- df_BGC_tmp
+}
+df_prop_mean_plot <- data.frame()
+df_prop_sd_plot <- data.frame()
+for (bgc_type in names(df_bgc_p_dcast_taxo_prop_SAG)[2:6]){
+  v_g__Enterococcus <- vector(length = length(df_all_count_list))
+  v_g__Enterococcus_B <- vector(length = length(df_all_count_list))
+  v_g__Lacticaseibacillus <- vector(length = length(df_all_count_list))
+  v_g__Lactiplantibacillus <- vector(length = length(df_all_count_list))
+  v_g__Lactobacillus <- vector(length = length(df_all_count_list))
+  v_g__Lactococcus <- vector(length = length(df_all_count_list))
+  v_g__Leuconostoc <- vector(length = length(df_all_count_list))
+  v_g__Ligilactobacillus <- vector(length = length(df_all_count_list))
+  v_g__Limosilactobacillus <- vector(length = length(df_all_count_list))
+  v_g__Oenococcus <- vector(length = length(df_all_count_list))
+  v_g__Streptococcus <- vector(length = length(df_all_count_list))
+  v_g__Enterococcus_D <- vector(length = length(df_all_count_list))
+  v_g__Lentilactobacillus <- vector(length = length(df_all_count_list))
+  v_g__Levilactobacillus <- vector(length = length(df_all_count_list))
+  v_g__Pediococcus <- vector(length = length(df_all_count_list))
+  v_g__Weissella <- vector(length = length(df_all_count_list))
+  for (i in 1:length(df_all_prop_list)){
+    v_g__Enterococcus[i] <- df_all_prop_list[[i]]["g__Enterococcus", bgc_type]
+    v_g__Enterococcus_B[i] <- df_all_prop_list[[i]]["g__Enterococcus_B", bgc_type]
+    v_g__Lacticaseibacillus[i] <- df_all_prop_list[[i]]["g__Lacticaseibacillus", bgc_type]
+    v_g__Lactiplantibacillus[i] <- df_all_prop_list[[i]]["g__Lactiplantibacillus", bgc_type]
+    v_g__Lactobacillus[i] <- df_all_prop_list[[i]]["g__Lactobacillus", bgc_type]
+    v_g__Lactococcus[i] <- df_all_prop_list[[i]]["g__Lactococcus", bgc_type]
+    v_g__Leuconostoc[i] <- df_all_prop_list[[i]]["g__Leuconostoc", bgc_type]
+    v_g__Ligilactobacillus[i] <- df_all_prop_list[[i]]["g__Ligilactobacillus", bgc_type]
+    v_g__Limosilactobacillus[i] <- df_all_prop_list[[i]]["g__Limosilactobacillus", bgc_type]
+    v_g__Oenococcus[i] <- df_all_prop_list[[i]]["g__Oenococcus", bgc_type]
+    v_g__Streptococcus[i] <- df_all_prop_list[[i]]["g__Streptococcus", bgc_type]
+    v_g__Enterococcus_D[i] <- df_all_prop_list[[i]]["g__Enterococcus_D", bgc_type]
+    v_g__Lentilactobacillus[i] <- df_all_prop_list[[i]]["g__Lentilactobacillu", bgc_type]
+    v_g__Levilactobacillus[i] <- df_all_prop_list[[i]]["g__Levilactobacillus", bgc_type]
+    v_g__Pediococcus[i] <- df_all_prop_list[[i]]["g__Pediococcus", bgc_type]
+    v_g__Weissella[i] <- df_all_prop_list[[i]]["g__Weissella", bgc_type]
+  }
+  df_prop_mean_plot["g__Enterococcus",bgc_type] <- mean(v_g__Enterococcus)
+  df_prop_mean_plot["g__Enterococcus_B",bgc_type] <- mean(v_g__Enterococcus_B)
+  df_prop_mean_plot["g__Lacticaseibacillus",bgc_type] <- mean(v_g__Lacticaseibacillus)
+  df_prop_mean_plot["g__Lactiplantibacillus",bgc_type] <- mean(v_g__Lactiplantibacillus)
+  df_prop_mean_plot["g__Lactobacillus",bgc_type] <- mean(v_g__Lactobacillus)
+  df_prop_mean_plot["g__Lactococcus",bgc_type] <- mean(v_g__Lactococcus)
+  df_prop_mean_plot["g__Leuconostoc",bgc_type] <- mean(v_g__Leuconostoc)
+  df_prop_mean_plot["g__Ligilactobacillus",bgc_type] <- mean(v_g__Ligilactobacillus)
+  df_prop_mean_plot["g__Limosilactobacillus",bgc_type] <- mean(v_g__Limosilactobacillus)
+  df_prop_mean_plot["g__Oenococcus",bgc_type] <- mean(v_g__Oenococcus)
+  df_prop_mean_plot["g__Streptococcus",bgc_type] <- mean(v_g__Streptococcus)
+  df_prop_mean_plot["g__Enterococcus_D",bgc_type] <- mean(v_g__Enterococcus_D)
+  df_prop_mean_plot["g__Lentilactobacillus",bgc_type] <- mean(v_g__Lentilactobacillus)
+  df_prop_mean_plot["g__Levilactobacillus",bgc_type] <- mean(v_g__Levilactobacillus)
+  df_prop_mean_plot["g__Pediococcus",bgc_type] <- mean(v_g__Pediococcus)
+  df_prop_mean_plot["g__Weissella",bgc_type] <- mean(v_g__Weissella)
+  
+  df_prop_sd_plot["g__Enterococcus",bgc_type] <- sd(v_g__Enterococcus)
+  df_prop_sd_plot["g__Enterococcus_B",bgc_type] <- sd(v_g__Enterococcus_B)
+  df_prop_sd_plot["g__Lacticaseibacillus",bgc_type] <- sd(v_g__Lacticaseibacillus)
+  df_prop_sd_plot["g__Lactiplantibacillus",bgc_type] <- sd(v_g__Lactiplantibacillus)
+  df_prop_sd_plot["g__Lactobacillus",bgc_type] <- sd(v_g__Lactobacillus)
+  df_prop_sd_plot["g__Lactococcus",bgc_type] <- sd(v_g__Lactococcus)
+  df_prop_sd_plot["g__Leuconostoc",bgc_type] <- sd(v_g__Leuconostoc)
+  df_prop_sd_plot["g__Ligilactobacillus",bgc_type] <- sd(v_g__Ligilactobacillus)
+  df_prop_sd_plot["g__Limosilactobacillus",bgc_type] <- sd(v_g__Limosilactobacillus)
+  df_prop_sd_plot["g__Oenococcus",bgc_type] <- sd(v_g__Oenococcus)
+  df_prop_sd_plot["g__Streptococcus",bgc_type] <- sd(v_g__Streptococcus)
+  df_prop_sd_plot["g__Enterococcus_D",bgc_type] <- sd(v_g__Enterococcus_D)
+  df_prop_sd_plot["g__Lentilactobacillus",bgc_type] <- sd(v_g__Lentilactobacillus)
+  df_prop_sd_plot["g__Levilactobacillus",bgc_type] <- sd(v_g__Levilactobacillus)
+  df_prop_sd_plot["g__Pediococcus",bgc_type] <- sd(v_g__Pediococcus)
+  df_prop_sd_plot["g__Weissella",bgc_type] <- sd(v_g__Weissella)
+}
+df_prop_mean_plot$genus <- rownames(df_prop_mean_plot)
+df_prop_mean_plot_melt <- reshape2::melt(df_prop_mean_plot, id="genus")
+names(df_prop_mean_plot_melt) <- c("genus", "Class", "Mean")
+df_prop_sd_plot$genus <- rownames(df_prop_sd_plot)
+df_prop_sd_plot_melt <- reshape2::melt(df_prop_sd_plot, id="genus")
+names(df_prop_sd_plot_melt) <- c("genus", "Class", "SD")
+df_plot_prop <- merge(df_prop_mean_plot_melt, df_prop_sd_plot_melt, by=c("genus", "Class"))
+df_plot_prop_m <- merge(df_plot_prop, genus_no, by.x = "genus", by.y = "Var1", all.x = TRUE)
+bgc_class_order <-  c("NRPS", "T3PKS", "Terpene", "RiPPs", "Others")
+df_plot_prop_m$Class <- factor(df_plot_prop_m$Class, levels = bgc_class_order)
+
+df_plot_m$type <- "Count"
+df_plot_prop_m$type <- "Proportion"
+df_plot_summary <- rbind(df_plot_m, df_plot_prop_m)
+df_plot_summary$Class <- factor(df_plot_summary$Class, levels = bgc_class_order)
+df_plot_summary$type <- factor(df_plot_summary$type, levels = c("Proportion", "Count"))
+if (print_table){
+  write.table(df_plot_summary, file = "input_Figure_3_A.tsv", sep = "\t", row.names = FALSE, quote = FALSE)
+}
+p <- ggplot(df_plot_summary, aes(fill=label, y=Mean, x=Class)) + 
+            geom_bar(position="dodge", stat="identity") +
+            geom_errorbar(aes(ymin=Mean-SD, ymax=Mean+SD), width=0.2, position = position_dodge(0.9))+
+            theme_bw()+
+            facet_grid(type~., scales = "free_y")+
+            scale_fill_d3("category20")+
+            xlab("")+
+            theme(axis.text = element_text(size = 14, colour = "black"),
+                  #axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+                  legend.position = "top")
+if (print_figure){
+  ggsave(filename = "Distribution_of_BGC_in_16_genera.pdf",plot = p, useDingbats = FALSE, width = 12,height = 6)
+}
+
+
+#############################################################################################
+# RiPPs profile in 16 genera containing > 100 genomes, using Bootstrap with 1000 times
+#############################################################################################
+df_SAGs <- df_bgc_m_4 %>% filter(genome_type=="SAG") 
+df_SAGs_RiPPs_p_dcast_taxo_all_genome <- merge(df_SAGs_RiPPs_p_dcast, as.data.frame(distinct(df_SAGs[,c("Genome","genus","family")])), by="Genome", all.y = TRUE)
+df_SAGs_RiPPs_p_dcast_taxo_all_genome[is.na(df_SAGs_RiPPs_p_dcast_taxo_all_genome)] <- 0
+df_all_count_list <- list()
+set.seed(123)
+for (repeate in 1:1000){
+  df_BGC_tmp <- data.frame()
+  for (i in genus_select){
+    # fetch out 50% genome
+    df_one_genus_BGCs <- df_SAGs_RiPPs_p_dcast_taxo_all_genome %>% filter(genus==i)
+    genome_fetch <- sample(df_one_genus_BGCs$Genome, size=nrow(df_one_genus_BGCs)/2, replace=F)
+    genome_no <- length(genome_fetch)
+    df_select <- df_one_genus_BGCs[df_one_genus_BGCs$Genome %in% genome_fetch,]
+    df_bgc_type_mean_count <- as.data.frame(colSums(df_select[,2:9]) / nrow(df_select)) %>% t() %>% data.frame(check.names=FALSE)
+    rownames(df_bgc_type_mean_count) <- i
+    df_BGC_tmp <- rbind(df_BGC_tmp, df_bgc_type_mean_count)
+  }
+  df_all_count_list[[repeate]] <- df_BGC_tmp
+}
+df_count_mean_plot <- data.frame()
+df_count_sd_plot <- data.frame()
+for (bgc_type in names(df_SAGs_RiPPs_p_dcast_taxo_all_genome)[2:9]){
+  v_g__Enterococcus <- vector(length = length(df_all_count_list))
+  v_g__Enterococcus_B <- vector(length = length(df_all_count_list))
+  v_g__Lacticaseibacillus <- vector(length = length(df_all_count_list))
+  v_g__Lactiplantibacillus <- vector(length = length(df_all_count_list))
+  v_g__Lactobacillus <- vector(length = length(df_all_count_list))
+  v_g__Lactococcus <- vector(length = length(df_all_count_list))
+  v_g__Leuconostoc <- vector(length = length(df_all_count_list))
+  v_g__Ligilactobacillus <- vector(length = length(df_all_count_list))
+  v_g__Limosilactobacillus <- vector(length = length(df_all_count_list))
+  v_g__Oenococcus <- vector(length = length(df_all_count_list))
+  v_g__Streptococcus <- vector(length = length(df_all_count_list))
+  v_g__Enterococcus_D <- vector(length = length(df_all_count_list))
+  v_g__Lentilactobacillus <- vector(length = length(df_all_count_list))
+  v_g__Levilactobacillus <- vector(length = length(df_all_count_list))
+  v_g__Pediococcus <- vector(length = length(df_all_count_list))
+  v_g__Weissella <- vector(length = length(df_all_count_list))
+  for (i in 1:length(df_all_count_list)){
+    v_g__Enterococcus[i] <- df_all_count_list[[i]]["g__Enterococcus", bgc_type]
+    v_g__Enterococcus_B[i] <- df_all_count_list[[i]]["g__Enterococcus_B", bgc_type]
+    v_g__Lacticaseibacillus[i] <- df_all_count_list[[i]]["g__Lacticaseibacillus", bgc_type]
+    v_g__Lactiplantibacillus[i] <- df_all_count_list[[i]]["g__Lactiplantibacillus", bgc_type]
+    v_g__Lactobacillus[i] <- df_all_count_list[[i]]["g__Lactobacillus", bgc_type]
+    v_g__Lactococcus[i] <- df_all_count_list[[i]]["g__Lactococcus", bgc_type]
+    v_g__Leuconostoc[i] <- df_all_count_list[[i]]["g__Leuconostoc", bgc_type]
+    v_g__Ligilactobacillus[i] <- df_all_count_list[[i]]["g__Ligilactobacillus", bgc_type]
+    v_g__Limosilactobacillus[i] <- df_all_count_list[[i]]["g__Limosilactobacillus", bgc_type]
+    v_g__Oenococcus[i] <- df_all_count_list[[i]]["g__Oenococcus", bgc_type]
+    v_g__Streptococcus[i] <- df_all_count_list[[i]]["g__Streptococcus", bgc_type]
+    v_g__Enterococcus_D[i] <- df_all_count_list[[i]]["g__Enterococcus_D", bgc_type]
+    v_g__Lentilactobacillus[i] <- df_all_count_list[[i]]["g__Lentilactobacillu", bgc_type]
+    v_g__Levilactobacillus[i] <- df_all_count_list[[i]]["g__Levilactobacillus", bgc_type]
+    v_g__Pediococcus[i] <- df_all_count_list[[i]]["g__Pediococcus", bgc_type]
+    v_g__Weissella[i] <- df_all_count_list[[i]]["g__Weissella", bgc_type]
+  }
+  df_count_mean_plot["g__Enterococcus",bgc_type] <- mean(v_g__Enterococcus)
+  df_count_mean_plot["g__Enterococcus_B",bgc_type] <- mean(v_g__Enterococcus_B)
+  df_count_mean_plot["g__Lacticaseibacillus",bgc_type] <- mean(v_g__Lacticaseibacillus)
+  df_count_mean_plot["g__Lactiplantibacillus",bgc_type] <- mean(v_g__Lactiplantibacillus)
+  df_count_mean_plot["g__Lactobacillus",bgc_type] <- mean(v_g__Lactobacillus)
+  df_count_mean_plot["g__Lactococcus",bgc_type] <- mean(v_g__Lactococcus)
+  df_count_mean_plot["g__Leuconostoc",bgc_type] <- mean(v_g__Leuconostoc)
+  df_count_mean_plot["g__Ligilactobacillus",bgc_type] <- mean(v_g__Ligilactobacillus)
+  df_count_mean_plot["g__Limosilactobacillus",bgc_type] <- mean(v_g__Limosilactobacillus)
+  df_count_mean_plot["g__Oenococcus",bgc_type] <- mean(v_g__Oenococcus)
+  df_count_mean_plot["g__Streptococcus",bgc_type] <- mean(v_g__Streptococcus)
+  df_count_mean_plot["g__Enterococcus_D",bgc_type] <- mean(v_g__Enterococcus_D)
+  df_count_mean_plot["g__Lentilactobacillus",bgc_type] <- mean(v_g__Lentilactobacillus)
+  df_count_mean_plot["g__Levilactobacillus",bgc_type] <- mean(v_g__Levilactobacillus)
+  df_count_mean_plot["g__Pediococcus",bgc_type] <- mean(v_g__Pediococcus)
+  df_count_mean_plot["g__Weissella",bgc_type] <- mean(v_g__Weissella)
+  
+  df_count_sd_plot["g__Enterococcus",bgc_type] <- sd(v_g__Enterococcus)
+  df_count_sd_plot["g__Enterococcus_B",bgc_type] <- sd(v_g__Enterococcus_B)
+  df_count_sd_plot["g__Lacticaseibacillus",bgc_type] <- sd(v_g__Lacticaseibacillus)
+  df_count_sd_plot["g__Lactiplantibacillus",bgc_type] <- sd(v_g__Lactiplantibacillus)
+  df_count_sd_plot["g__Lactobacillus",bgc_type] <- sd(v_g__Lactobacillus)
+  df_count_sd_plot["g__Lactococcus",bgc_type] <- sd(v_g__Lactococcus)
+  df_count_sd_plot["g__Leuconostoc",bgc_type] <- sd(v_g__Leuconostoc)
+  df_count_sd_plot["g__Ligilactobacillus",bgc_type] <- sd(v_g__Ligilactobacillus)
+  df_count_sd_plot["g__Limosilactobacillus",bgc_type] <- sd(v_g__Limosilactobacillus)
+  df_count_sd_plot["g__Oenococcus",bgc_type] <- sd(v_g__Oenococcus)
+  df_count_sd_plot["g__Streptococcus",bgc_type] <- sd(v_g__Streptococcus)
+  df_count_sd_plot["g__Enterococcus_D",bgc_type] <- sd(v_g__Enterococcus_D)
+  df_count_sd_plot["g__Lentilactobacillus",bgc_type] <- sd(v_g__Lentilactobacillus)
+  df_count_sd_plot["g__Levilactobacillus",bgc_type] <- sd(v_g__Levilactobacillus)
+  df_count_sd_plot["g__Pediococcus",bgc_type] <- sd(v_g__Pediococcus)
+  df_count_sd_plot["g__Weissella",bgc_type] <- sd(v_g__Weissella)
+}
+df_count_mean_plot$genus <- rownames(df_count_mean_plot)
+df_count_mean_plot_melt <- reshape2::melt(df_count_mean_plot, id="genus")
+names(df_count_mean_plot_melt) <- c("genus", "Class", "Mean")
+df_count_sd_plot$genus <- rownames(df_count_sd_plot)
+df_count_sd_plot_melt <- reshape2::melt(df_count_sd_plot, id="genus")
+names(df_count_sd_plot_melt) <- c("genus", "Class", "SD")
+df_plot <- merge(df_count_mean_plot_melt, df_count_sd_plot_melt, by=c("genus", "Class"))
+df_plot_m <- merge(df_plot, genus_no, by.x = "genus", by.y = "Var1", all.x = TRUE)
+df_plot_m$Class <- factor(df_plot_m$Class, levels = index_ripps)
+
+p <- ggplot(df_plot_m, aes(fill=label, y=Mean, x=Class)) + 
+            geom_bar(position="dodge", stat="identity") +
+            geom_errorbar(aes(ymin=Mean-SD, ymax=Mean+SD), width=0.2, position = position_dodge(0.9))+
+            theme_bw()+
+            scale_fill_d3("category20")+
+            xlab("")+
+            theme(axis.text = element_text(size = 14, colour = "black"),
+                  axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+                  legend.position = "top")
+if (print_figure){
+  ggsave(filename = "Distribution_of_RiPPs_in_16_genera.pdf",plot = p, useDingbats = FALSE, width = 12,height = 4.6)
+}
+if (print_table){
+  write.table(df_plot_m, file = "Table_Distribution_of_RiPPs_in_16_genera.tsv", sep = "\t", row.names = FALSE, quote = FALSE)
+}
+
+```
+

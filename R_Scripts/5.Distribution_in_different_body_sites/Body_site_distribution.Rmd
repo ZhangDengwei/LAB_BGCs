@@ -1,0 +1,2018 @@
+---
+title: "body_site_distribution"
+output: html_document
+date: '2022-04-12'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# load libraries
+```{r}
+library(ggplot2)
+library(dplyr)
+library(pheatmap)
+library(openxlsx)
+library(UpSetR)
+library(vegan)
+library(ggthemes)
+library(psych)
+library(Rtsne)
+library(ggpubr)
+library(vegan)
+library(ggrepel)
+```
+
+
+# load data sets
+```{r}
+# biosynthetics-related genes
+biosynthetic_related_genes <- read.delim2("biosynthetic_related.CDS.tsv", header = FALSE)
+
+# BGC presence
+df_bgc_present_Anterior_nares <- read.delim2("./featureCounts/01.anterior_nares_MG/genome_31977_modify_classII_overlap_0.2__BGCs_present.tsv", comment.char = "#")
+df_bgc_present_supragingival_plaque <- read.delim2("./featureCounts/02.supragingival_plaque_MG/genome_31977_modify_classII_overlap_0.2__BGCs_present.tsv", comment.char = "#")
+df_bgc_present_buccal_mucosa <- read.delim2("./featureCounts/03.buccal_mucosa_MG/genome_31977_modify_classII_overlap_0.2__BGCs_present.tsv", comment.char = "#")
+df_bgc_present_tongue_dorsum <- read.delim2("./featureCounts/04.tongue_dorsum_MG/genome_31977_modify_classII_overlap_0.2__BGCs_present.tsv", comment.char = "#")
+df_bgc_present_posterior_fornix <- read.delim2("./featureCounts/05.posterior_fornix_MG/genome_31977_modify_classII_overlap_0.2__BGCs_present.tsv", comment.char = "#")
+df_bgc_present_stool <- read.delim2("./featureCounts/06.stool_MG/genome_31977_modify_classII_overlap_0.2__BGCs_present.tsv", comment.char = "#")
+df_bgc_present_vagina_MT <- read.delim2("./featureCounts/07.Vagina_MT/genome_31977_modify_classII_overlap_0.2__BGCs_present.tsv", comment.char = "#")
+
+df_bgc_present_Anterior_nares$Samples <- gsub("aln.|.sorted.bam","",df_bgc_present_Anterior_nares$Samples)
+df_bgc_present_supragingival_plaque$Samples <- gsub("aln.|.sorted.bam","",df_bgc_present_supragingival_plaque$Samples)
+df_bgc_present_buccal_mucosa$Samples <- gsub("aln.|.sorted.bam","",df_bgc_present_buccal_mucosa$Samples)
+df_bgc_present_tongue_dorsum$Samples <- gsub("aln.|.sorted.bam","",df_bgc_present_tongue_dorsum$Samples)
+df_bgc_present_posterior_fornix$Samples <- gsub("aln.|.sorted.bam","",df_bgc_present_posterior_fornix$Samples)
+df_bgc_present_stool$Samples <- gsub("align_|.sam","",df_bgc_present_stool$Samples)
+df_bgc_present_vagina_MT$Samples <- gsub("aln.|.sorted.bam","",df_bgc_present_vagina_MT$Samples)
+
+# total read number in each sample (here, only count the read 1 in paired-end reads)
+df_read_no_Anterior_nares <- read.delim2("./sequencing_library_size/seqkit.statistic_Anterior_nares.tsv")
+df_read_no_supragingival_plaque <- read.delim2("./sequencing_library_size/seqkit.statistic_Supragingival_plaque.tsv")
+df_read_no_buccal_mucosa <- read.delim2("./sequencing_library_size/seqkit.statistic_Buccal_mucosa.tsv")
+df_read_no_tongue_dorsum <- read.delim2("./sequencing_library_size/seqkit.statistic_Tongue_dorsum.tsv")
+df_read_no_posterior_fornix <- read.delim2("./sequencing_library_size/seqkit.statistic_Posterior_fornix.tsv")
+df_read_no_stool <- read.delim2("./sequencing_library_size/seqkit.statistic_Stool.tsv")
+df_read_no_vagina_MT <- read.delim2("./sequencing_library_size/seqkit.statistic_Vagina_MT.tsv")
+
+# genus abundance
+df_genus_Anterior_nares <- read.delim2("./genus_abundance/merged_genus_Anterior_nares.txt")
+df_genus_supragingival_plaque <- read.delim2("./genus_abundance/merged_genus_supragingival_plaque.txt")
+df_genus_buccal_mucosa <- read.delim2("./genus_abundance/merged_genus_Buccal_mucosa.txt")
+df_genus_tongue_dorsum <- read.delim2("./genus_abundance/merged_genus_Tongue_dorsum.txt")
+df_genus_posterior_fornix <- read.delim2("./genus_abundance/merged_genus_posterior_fornix.txt")
+df_genus_stool <- read.delim2("./genus_abundance/merged_genus_stool.txt")
+
+df_genus_Anterior_nares <- subset(df_genus_Anterior_nares, select = -NCBI_tax_id)
+df_genus_supragingival_plaque <- subset(df_genus_supragingival_plaque, select = -NCBI_tax_id)
+df_genus_buccal_mucosa <- subset(df_genus_buccal_mucosa, select = -NCBI_tax_id)
+df_genus_tongue_dorsum <- subset(df_genus_tongue_dorsum, select = -NCBI_tax_id)
+df_genus_posterior_fornix <- subset(df_genus_posterior_fornix, select = -NCBI_tax_id)
+df_genus_stool <- subset(df_genus_stool, select = -NCBI_tax_id)
+
+# species abundance
+df_species_Anterior_nares <- read.delim2("./species_abundance/merged_species_Anterior_nares.txt")
+df_species_supragingival_plaque <- read.delim2("./species_abundance/merged_species_oral.txt")
+df_species_buccal_mucosa <- read.delim2("./species_abundance/merged_species_Buccal_mucosa.txt")
+df_species_tongue_dorsum <- read.delim2("./species_abundance/merged_species_Tongue_dorsum.txt")
+df_species_posterior_fornix <- read.delim2("./species_abundance/merged_species_vagina.txt")
+df_species_stool <- read.delim2("./species_abundance/merged_species_gut.txt")
+
+rownames(df_species_Anterior_nares) <- df_species_Anterior_nares$clade_name
+rownames(df_species_supragingival_plaque) <- df_species_supragingival_plaque$clade_name
+rownames(df_species_buccal_mucosa) <- df_species_buccal_mucosa$clade_name
+rownames(df_species_tongue_dorsum) <- df_species_tongue_dorsum$clade_name
+rownames(df_species_posterior_fornix) <- df_species_posterior_fornix$clade_name
+rownames(df_species_stool) <- df_species_stool$clade_name
+
+df_species_Anterior_nares <- subset(df_species_Anterior_nares, select = -c(NCBI_tax_id, clade_name))
+df_species_supragingival_plaque <- subset(df_species_supragingival_plaque, select = -c(NCBI_tax_id, clade_name))
+df_species_buccal_mucosa <- subset(df_species_buccal_mucosa, select = -c(NCBI_tax_id, clade_name))
+df_species_tongue_dorsum <- subset(df_species_tongue_dorsum, select = -c(NCBI_tax_id, clade_name))
+df_species_posterior_fornix <- subset(df_species_posterior_fornix, select = -c(NCBI_tax_id, clade_name))
+df_species_stool <- subset(df_species_stool, select = -c(NCBI_tax_id, clade_name))
+
+# raw counts of BGC genes
+df_bgc_genes_Anterior_nares <- read.delim2("./featureCounts/01.anterior_nares_MG/CDS_counts_summary.classII_merge__overlap_0.2", comment.char = "#")
+df_bgc_genes_supragingival_plaque <- read.delim2("./featureCounts/02.supragingival_plaque_MG/CDS_counts_summary.classII_merge__overlap_0.2", comment.char = "#")
+df_bgc_genes_buccal_mucosa <- read.delim2("./featureCounts/03.buccal_mucosa_MG/CDS_counts_summary.classII_merge__overlap_0.2", comment.char = "#")
+df_bgc_genes_tongue_dorsum <- read.delim2("./featureCounts/04.tongue_dorsum_MG/CDS_counts_summary.classII_merge__overlap_0.2", comment.char = "#")
+df_bgc_genes_posterior_fornix <- read.delim2("./featureCounts/05.posterior_fornix_MG/CDS_counts_summary.classII_merge__overlap_0.2", comment.char = "#")
+df_bgc_genes_stool <- read.delim2("./featureCounts/06.stool_MG/CDS_counts_summary.classII_merge__overlap_0.2", comment.char = "#")
+df_bgc_genes_vagina_MT <- read.delim2("./featureCounts/07.Vagina_MT/CDS_counts_summary.classII_merge__overlap_0.2", comment.char = "#")
+  
+names(df_bgc_genes_Anterior_nares) <- gsub("aln.|.sorted.bam","",names(df_bgc_genes_Anterior_nares))
+names(df_bgc_genes_supragingival_plaque) <- gsub("aln.|.sorted.bam","",names(df_bgc_genes_supragingival_plaque ))
+names(df_bgc_genes_buccal_mucosa) <- gsub("aln.|.sorted.bam","",names(df_bgc_genes_buccal_mucosa))
+names(df_bgc_genes_tongue_dorsum) <- gsub("aln.|.sorted.bam","",names(df_bgc_genes_tongue_dorsum))
+names(df_bgc_genes_posterior_fornix) <- gsub("aln.|.sorted.bam","",names(df_bgc_genes_posterior_fornix))
+names(df_bgc_genes_stool) <- gsub("align_|.sam","",names(df_bgc_genes_stool))
+names(df_bgc_genes_vagina_MT) <- gsub("aln.|.sorted.bam","",names(df_bgc_genes_vagina_MT))
+```
+
+
+# data processing
+```{r}
+## each body sites (Note: the total read counts must be > 100 k)
+set.seed(123)
+
+select_sampel_Anterior_nares <- intersect(df_read_no_Anterior_nares[df_read_no_Anterior_nares$num_seqs>100000, "file"], names(df_bgc_genes_Anterior_nares)[7:ncol(df_bgc_genes_Anterior_nares)])
+select_sampel_supragingival_plaque <- intersect(df_read_no_supragingival_plaque[df_read_no_supragingival_plaque$num_seqs>100000, "file"], names(df_bgc_genes_supragingival_plaque)[7:ncol(df_bgc_genes_supragingival_plaque)])
+select_sampel_buccal_mucosa <- intersect(df_read_no_buccal_mucosa[df_read_no_buccal_mucosa$num_seqs>100000, "file"], names(df_bgc_genes_buccal_mucosa)[7:ncol(df_bgc_genes_buccal_mucosa)])
+select_sampel_tongue_dorsum <- intersect(df_read_no_tongue_dorsum[df_read_no_tongue_dorsum$num_seqs>100000, "file"], names(df_bgc_genes_tongue_dorsum)[7:ncol(df_bgc_genes_tongue_dorsum)])
+select_sampel_posterior_fornix <- intersect(df_read_no_posterior_fornix[df_read_no_posterior_fornix$num_seqs>100000, "file"], names(df_bgc_genes_posterior_fornix)[7:ncol(df_bgc_genes_posterior_fornix)])
+select_sampel_stool <- intersect(df_read_no_stool[df_read_no_stool$num_seqs>100000, "file"], names(df_bgc_genes_stool)[7:ncol(df_bgc_genes_stool)])
+
+# remove sample "SRS019327" as it failed to geneus annotation
+sample_Tongue_dorsum <- names(df_bgc_genes_tongue_dorsum)[7:ncol(df_bgc_genes_tongue_dorsum)]
+sample_Tongue_dorsum_f <- sample_Tongue_dorsum[sample_Tongue_dorsum!="SRS019327"]
+select_sampel_tongue_dorsum <- intersect(df_read_no_tongue_dorsum[df_read_no_tongue_dorsum$num_seqs>100000, "file"], sample_Tongue_dorsum_f)
+
+# filter samples
+df_bgc_genes_Anterior_nares_f <- df_bgc_genes_Anterior_nares %>% select(names(df_bgc_genes_Anterior_nares)[1:6], select_sampel_Anterior_nares)
+df_bgc_genes_supragingival_plaque_f <- df_bgc_genes_supragingival_plaque %>% select(names(df_bgc_genes_supragingival_plaque)[1:6], select_sampel_supragingival_plaque)
+df_bgc_genes_buccal_mucosa_f <- df_bgc_genes_buccal_mucosa %>% select(names(df_bgc_genes_buccal_mucosa)[1:6], select_sampel_buccal_mucosa)
+df_bgc_genes_tongue_dorsum_f <- df_bgc_genes_tongue_dorsum %>% select(names(df_bgc_genes_tongue_dorsum)[1:6], select_sampel_tongue_dorsum)
+df_bgc_genes_posterior_fornix_f <- df_bgc_genes_posterior_fornix %>% select(names(df_bgc_genes_posterior_fornix)[1:6], select_sampel_posterior_fornix)
+df_bgc_genes_stool_f <- df_bgc_genes_stool %>% select(names(df_bgc_genes_stool)[1:6], select_sampel_stool)
+
+df_read_no_Anterior_nares <- df_read_no_Anterior_nares %>% filter(df_read_no_Anterior_nares$file %in% names(df_bgc_genes_Anterior_nares_f))
+df_read_no_supragingival_plaque <- df_read_no_supragingival_plaque %>% filter(df_read_no_supragingival_plaque$file %in% names(df_bgc_genes_supragingival_plaque_f))
+df_read_no_buccal_mucosa <- df_read_no_buccal_mucosa %>% filter(df_read_no_buccal_mucosa$file %in% names(df_bgc_genes_buccal_mucosa_f))
+df_read_no_tongue_dorsum <- df_read_no_tongue_dorsum %>% filter(df_read_no_tongue_dorsum$file %in% names(df_bgc_genes_tongue_dorsum_f))
+df_read_no_posterior_fornix <- df_read_no_posterior_fornix %>% filter(df_read_no_posterior_fornix$file %in% names(df_bgc_genes_posterior_fornix_f))
+df_read_no_stool <- df_read_no_stool %>% filter(df_read_no_stool$file %in% names(df_bgc_genes_stool_f))
+
+index_order <- factor(df_read_no_Anterior_nares$file, levels = names(df_bgc_genes_Anterior_nares_f)[7:ncol(df_bgc_genes_Anterior_nares_f)])
+df_read_no_Anterior_nares <- df_read_no_Anterior_nares[order(index_order), ]
+identical(df_read_no_Anterior_nares$file, names(df_bgc_genes_Anterior_nares_f)[7:ncol(df_bgc_genes_Anterior_nares_f)])
+index_order <- factor(df_read_no_supragingival_plaque$file, levels = names(df_bgc_genes_supragingival_plaque_f)[7:ncol(df_bgc_genes_supragingival_plaque_f)])
+df_read_no_supragingival_plaque <- df_read_no_supragingival_plaque[order(index_order), ]
+identical(df_read_no_supragingival_plaque$file, names(df_bgc_genes_supragingival_plaque_f)[7:ncol(df_bgc_genes_supragingival_plaque_f)])
+index_order <- factor(df_read_no_buccal_mucosa$file, levels = names(df_bgc_genes_buccal_mucosa_f)[7:ncol(df_bgc_genes_buccal_mucosa_f)])
+df_read_no_buccal_mucosa <- df_read_no_buccal_mucosa[order(index_order), ]
+identical(df_read_no_buccal_mucosa$file, names(df_bgc_genes_buccal_mucosa_f)[7:ncol(df_bgc_genes_buccal_mucosa_f)])
+index_order <- factor(df_read_no_tongue_dorsum$file, levels = names(df_bgc_genes_tongue_dorsum_f)[7:ncol(df_bgc_genes_tongue_dorsum_f)])
+df_read_no_tongue_dorsum <- df_read_no_tongue_dorsum[order(index_order), ]
+identical(df_read_no_tongue_dorsum$file, names(df_bgc_genes_tongue_dorsum_f)[7:ncol(df_bgc_genes_tongue_dorsum_f)])
+index_order <- factor(df_read_no_posterior_fornix$file, levels = names(df_bgc_genes_posterior_fornix_f)[7:ncol(df_bgc_genes_posterior_fornix_f)])
+df_read_no_posterior_fornix <- df_read_no_posterior_fornix[order(index_order), ]
+identical(df_read_no_posterior_fornix$file, names(df_bgc_genes_posterior_fornix_f)[7:ncol(df_bgc_genes_posterior_fornix_f)])
+index_order <- factor(df_read_no_stool$file, levels = names(df_bgc_genes_stool_f)[7:ncol(df_bgc_genes_stool_f)])
+df_read_no_stool <- df_read_no_stool[order(index_order), ]
+identical(df_read_no_stool$file, names(df_bgc_genes_stool_f)[7:ncol(df_bgc_genes_stool_f)])
+  
+################################################################################
+# calculate abundance calculation
+################################################################################
+# define function for calculating BGC abundance
+# abundance, normalized by total read number and gene length
+abu <- function(matrixIn, libSize){
+  abu_len <- matrixIn[,7:ncol(matrixIn)] / matrixIn$Length
+  abu_size <- t(t(abu_len)/libSize) * 10^6
+  abu_size <- as.data.frame(abu_size)
+  abu_size$Geneid <- matrixIn$Geneid
+  abu_size$GCF <- matrixIn$Chr
+  return(abu_size)
+}
+
+df_bgc_nor_Anterior_nares <- abu(df_bgc_genes_Anterior_nares_f, df_read_no_Anterior_nares$num_seqs)
+df_bgc_nor_supragingival_plaque <- abu(df_bgc_genes_supragingival_plaque_f, df_read_no_supragingival_plaque$num_seqs)
+df_bgc_nor_buccal_mucosa <- abu(df_bgc_genes_buccal_mucosa_f, df_read_no_buccal_mucosa$num_seqs)
+df_bgc_nor_tongue_dorsum <- abu(df_bgc_genes_tongue_dorsum_f, df_read_no_tongue_dorsum$num_seqs)
+df_bgc_nor_posterior_fornix <- abu(df_bgc_genes_posterior_fornix_f, df_read_no_posterior_fornix$num_seqs)
+df_bgc_nor_stool <- abu(df_bgc_genes_stool_f, df_read_no_stool$num_seqs)
+
+################################################################################
+# filter biosynthesis-related genes
+################################################################################
+df_bgc_nor_Anterior_nares_f <- df_bgc_nor_Anterior_nares %>% filter(Geneid %in% biosynthetic_related_genes$V1)
+df_bgc_nor_supragingival_plaque_f <- df_bgc_nor_supragingival_plaque %>% filter(Geneid %in% biosynthetic_related_genes$V1)
+df_bgc_nor_buccal_mucosa_f <- df_bgc_nor_buccal_mucosa %>% filter(Geneid %in% biosynthetic_related_genes$V1)
+df_bgc_nor_tongue_dorsum_f <- df_bgc_nor_tongue_dorsum %>% filter(Geneid %in% biosynthetic_related_genes$V1)
+df_bgc_nor_posterior_fornix_f <- df_bgc_nor_posterior_fornix %>% filter(Geneid %in% biosynthetic_related_genes$V1)
+df_bgc_nor_stool_f <- df_bgc_nor_stool %>% filter(Geneid %in% biosynthetic_related_genes$V1)
+
+df_bgc_nor_Anterior_nares_f <- subset(df_bgc_nor_Anterior_nares_f, select=-Geneid)
+df_bgc_nor_supragingival_plaque_f <- subset(df_bgc_nor_supragingival_plaque_f, select=-Geneid)
+df_bgc_nor_buccal_mucosa_f <- subset(df_bgc_nor_buccal_mucosa_f, select=-Geneid)
+df_bgc_nor_tongue_dorsum_f <- subset(df_bgc_nor_tongue_dorsum_f, select=-Geneid)
+df_bgc_nor_posterior_fornix_f <- subset(df_bgc_nor_posterior_fornix_f, select=-Geneid)
+df_bgc_nor_stool_f <- subset(df_bgc_nor_stool_f, select=-Geneid)
+
+# abundance at BGC level, attribute the average abundance of BGC genes to a BGC
+df_bgc_nor_Anterior_nares_f <- aggregate(. ~ GCF, data = df_bgc_nor_Anterior_nares_f, mean)
+df_bgc_nor_supragingival_plaque_f <- aggregate(. ~ GCF, data = df_bgc_nor_supragingival_plaque_f, mean)
+df_bgc_nor_buccal_mucosa_f <- aggregate(. ~ GCF, data = df_bgc_nor_buccal_mucosa_f, mean)
+df_bgc_nor_tongue_dorsum_f <- aggregate(. ~ GCF, data = df_bgc_nor_tongue_dorsum_f, mean)
+df_bgc_nor_posterior_fornix_f <- aggregate(. ~ GCF, data = df_bgc_nor_posterior_fornix_f, mean)
+df_bgc_nor_stool_f <- aggregate(. ~ GCF, data = df_bgc_nor_stool_f, mean)
+
+# attribute 0 to BGCs that are considered as absent
+df_bgc_present_Anterior_nares_f <- df_bgc_present_Anterior_nares %>% filter(Samples %in% names(df_bgc_nor_Anterior_nares_f)) 
+df_bgc_present_supragingival_plaque_f <- df_bgc_present_supragingival_plaque %>% filter(Samples %in% names(df_bgc_nor_supragingival_plaque_f))
+df_bgc_present_buccal_mucosa_f <- df_bgc_present_buccal_mucosa %>% filter(Samples %in% names(df_bgc_nor_buccal_mucosa_f))
+df_bgc_present_tongue_dorsum_f <- df_bgc_present_tongue_dorsum %>% filter(Samples %in% names(df_bgc_nor_tongue_dorsum_f))
+df_bgc_present_posterior_fornix_f <- df_bgc_present_posterior_fornix %>% filter(Samples %in% names(df_bgc_nor_posterior_fornix_f))
+df_bgc_present_stool_f <- df_bgc_present_stool %>% filter(Samples %in% names(df_bgc_nor_stool_f))
+
+rownames(df_bgc_present_Anterior_nares_f) <- df_bgc_present_Anterior_nares_f$Samples
+rownames(df_bgc_present_supragingival_plaque_f) <- df_bgc_present_supragingival_plaque_f$Samples
+rownames(df_bgc_present_buccal_mucosa_f) <- df_bgc_present_buccal_mucosa_f$Samples
+rownames(df_bgc_present_tongue_dorsum_f) <- df_bgc_present_tongue_dorsum_f$Samples
+rownames(df_bgc_present_posterior_fornix_f) <- df_bgc_present_posterior_fornix_f$Samples
+rownames(df_bgc_present_stool_f) <- df_bgc_present_stool_f$Samples
+df_bgc_present_Anterior_nares_f <- subset(df_bgc_present_Anterior_nares_f, select = -Samples) %>% t() %>% as.data.frame()
+df_bgc_present_supragingival_plaque_f <- subset(df_bgc_present_supragingival_plaque_f, select = -Samples) %>% t() %>% as.data.frame()
+df_bgc_present_buccal_mucosa_f <- subset(df_bgc_present_buccal_mucosa_f, select = -Samples) %>% t() %>% as.data.frame()
+df_bgc_present_tongue_dorsum_f <- subset(df_bgc_present_tongue_dorsum_f, select = -Samples) %>% t() %>% as.data.frame()
+df_bgc_present_posterior_fornix_f <- subset(df_bgc_present_posterior_fornix_f, select = -Samples) %>% t() %>% as.data.frame()
+df_bgc_present_stool_f <- subset(df_bgc_present_stool_f, select = -Samples) %>% t() %>% as.data.frame()
+
+df_bgc_nor_Anterior_nares_f <- df_bgc_nor_Anterior_nares_f[,c("GCF", names(df_bgc_present_Anterior_nares_f))]
+df_bgc_nor_supragingival_plaque_f <- df_bgc_nor_supragingival_plaque_f[,c("GCF", names(df_bgc_present_supragingival_plaque_f))]
+df_bgc_nor_buccal_mucosa_f <- df_bgc_nor_buccal_mucosa_f[,c("GCF", names(df_bgc_present_buccal_mucosa_f))]
+df_bgc_nor_tongue_dorsum_f <- df_bgc_nor_tongue_dorsum_f[,c("GCF", names(df_bgc_present_tongue_dorsum_f))]
+df_bgc_nor_posterior_fornix_f <- df_bgc_nor_posterior_fornix_f[,c("GCF", names(df_bgc_present_posterior_fornix_f))]
+df_bgc_nor_stool_f <- df_bgc_nor_stool_f[,c("GCF", names(df_bgc_present_stool_f))]
+
+index_order <- factor(df_bgc_nor_Anterior_nares_f$GCF, levels = rownames(df_bgc_present_Anterior_nares_f))
+df_bgc_nor_Anterior_nares_f <- df_bgc_nor_Anterior_nares_f[order(index_order), ]
+index_order <- factor(df_bgc_nor_supragingival_plaque_f$GCF, levels = rownames(df_bgc_present_supragingival_plaque_f))
+df_bgc_nor_supragingival_plaque_f <- df_bgc_nor_supragingival_plaque_f[order(index_order), ]
+index_order <- factor(df_bgc_nor_buccal_mucosa_f$GCF, levels = rownames(df_bgc_present_buccal_mucosa_f))
+df_bgc_nor_buccal_mucosa_f <- df_bgc_nor_buccal_mucosa_f[order(index_order), ]
+index_order <- factor(df_bgc_nor_tongue_dorsum_f$GCF, levels = rownames(df_bgc_present_tongue_dorsum_f))
+df_bgc_nor_tongue_dorsum_f <- df_bgc_nor_tongue_dorsum_f[order(index_order), ]
+index_order <- factor(df_bgc_nor_posterior_fornix_f$GCF, levels = rownames(df_bgc_present_posterior_fornix_f))
+df_bgc_nor_posterior_fornix_f <- df_bgc_nor_posterior_fornix_f[order(index_order), ]
+index_order <- factor(df_bgc_nor_stool_f$GCF, levels = rownames(df_bgc_present_stool_f))
+df_bgc_nor_stool_f <- df_bgc_nor_stool_f[order(index_order), ]
+
+identical(names(df_bgc_present_Anterior_nares_f), names(df_bgc_nor_Anterior_nares_f)[2:ncol(df_bgc_nor_Anterior_nares_f)])
+identical(names(df_bgc_present_supragingival_plaque_f), names(df_bgc_nor_supragingival_plaque_f)[2:ncol(df_bgc_nor_supragingival_plaque_f)])
+identical(names(df_bgc_present_buccal_mucosa_f), names(df_bgc_nor_buccal_mucosa_f)[2:ncol(df_bgc_nor_buccal_mucosa_f)])
+identical(names(df_bgc_present_tongue_dorsum_f), names(df_bgc_nor_tongue_dorsum_f)[2:ncol(df_bgc_nor_tongue_dorsum_f)])
+identical(names(df_bgc_present_posterior_fornix_f), names(df_bgc_nor_posterior_fornix_f)[2:ncol(df_bgc_nor_posterior_fornix_f)])
+identical(names(df_bgc_present_stool_f), names(df_bgc_nor_stool_f)[2:ncol(df_bgc_nor_stool_f)])
+identical(rownames(df_bgc_present_Anterior_nares_f), df_bgc_nor_Anterior_nares_f$GCF)
+identical(rownames(df_bgc_present_supragingival_plaque_f), df_bgc_nor_supragingival_plaque_f$GCF)
+identical(rownames(df_bgc_present_buccal_mucosa_f), df_bgc_nor_buccal_mucosa_f$GCF)
+identical(rownames(df_bgc_present_tongue_dorsum_f), df_bgc_nor_tongue_dorsum_f$GCF)
+identical(rownames(df_bgc_present_posterior_fornix_f), df_bgc_nor_posterior_fornix_f$GCF)
+identical(rownames(df_bgc_present_stool_f), df_bgc_nor_stool_f$GCF)
+
+df_bgc_nor_Anterior_nares_f[,2:ncol(df_bgc_nor_Anterior_nares_f)][df_bgc_present_Anterior_nares_f==0] <- 0
+df_bgc_nor_supragingival_plaque_f[,2:ncol(df_bgc_nor_supragingival_plaque_f)][df_bgc_present_supragingival_plaque_f==0] <- 0
+df_bgc_nor_buccal_mucosa_f[,2:ncol(df_bgc_nor_buccal_mucosa_f)][df_bgc_present_buccal_mucosa_f==0] <- 0
+df_bgc_nor_tongue_dorsum_f[,2:ncol(df_bgc_nor_tongue_dorsum_f)][df_bgc_present_tongue_dorsum_f==0] <- 0
+df_bgc_nor_posterior_fornix_f[,2:ncol(df_bgc_nor_posterior_fornix_f)][df_bgc_present_posterior_fornix_f==0] <- 0
+df_bgc_nor_stool_f[,2:ncol(df_bgc_nor_stool_f)][df_bgc_present_stool_f==0] <- 0
+
+# abundance at GCF level, attribute the sum abundance of BGC genes to GCF
+df_bgc_nor_Anterior_nares_f2 <- df_bgc_nor_Anterior_nares_f
+df_bgc_nor_supragingival_plaque_f2 <- df_bgc_nor_supragingival_plaque_f
+df_bgc_nor_buccal_mucosa_f2 <- df_bgc_nor_buccal_mucosa_f
+df_bgc_nor_tongue_dorsum_f2 <- df_bgc_nor_tongue_dorsum_f
+df_bgc_nor_posterior_fornix_f2 <- df_bgc_nor_posterior_fornix_f
+df_bgc_nor_stool_f2 <- df_bgc_nor_stool_f
+
+df_bgc_nor_Anterior_nares_f2$GCF <- gsub("__unique_\\d+", "", df_bgc_nor_Anterior_nares_f2$GCF)
+df_bgc_nor_Anterior_nares_f2 <- aggregate(.~GCF, df_bgc_nor_Anterior_nares_f2, sum)
+df_bgc_nor_Anterior_nares_f2 <- df_bgc_nor_Anterior_nares_f2[df_bgc_nor_Anterior_nares_f2$GCF!="GCF_NA",]
+df_bgc_nor_supragingival_plaque_f2$GCF <- gsub("__unique_\\d+", "", df_bgc_nor_supragingival_plaque_f2$GCF)
+df_bgc_nor_supragingival_plaque_f2 <- aggregate(.~GCF, df_bgc_nor_supragingival_plaque_f2, sum)
+df_bgc_nor_supragingival_plaque_f2 <- df_bgc_nor_supragingival_plaque_f2[df_bgc_nor_supragingival_plaque_f2$GCF!="GCF_NA",]
+df_bgc_nor_buccal_mucosa_f2$GCF <- gsub("__unique_\\d+", "", df_bgc_nor_buccal_mucosa_f2$GCF)
+df_bgc_nor_buccal_mucosa_f2 <- aggregate(.~GCF, df_bgc_nor_buccal_mucosa_f2, sum)
+df_bgc_nor_buccal_mucosa_f2 <- df_bgc_nor_buccal_mucosa_f2[df_bgc_nor_buccal_mucosa_f2$GCF!="GCF_NA",]
+df_bgc_nor_tongue_dorsum_f2$GCF <- gsub("__unique_\\d+", "", df_bgc_nor_tongue_dorsum_f2$GCF)
+df_bgc_nor_tongue_dorsum_f2 <- aggregate(.~GCF, df_bgc_nor_tongue_dorsum_f2, sum)
+df_bgc_nor_tongue_dorsum_f2 <- df_bgc_nor_tongue_dorsum_f2[df_bgc_nor_tongue_dorsum_f2$GCF!="GCF_NA",]
+df_bgc_nor_posterior_fornix_f2$GCF <- gsub("__unique_\\d+", "", df_bgc_nor_posterior_fornix_f2$GCF)
+df_bgc_nor_posterior_fornix_f2 <- aggregate(.~GCF, df_bgc_nor_posterior_fornix_f2, sum)
+df_bgc_nor_posterior_fornix_f2 <- df_bgc_nor_posterior_fornix_f2[df_bgc_nor_posterior_fornix_f2$GCF!="GCF_NA",]
+df_bgc_nor_stool_f2$GCF <- gsub("__unique_\\d+", "", df_bgc_nor_stool_f2$GCF)
+df_bgc_nor_stool_f2 <- aggregate(.~GCF, df_bgc_nor_stool_f2, sum)
+df_bgc_nor_stool_f2 <- df_bgc_nor_stool_f2[df_bgc_nor_stool_f2$GCF!="GCF_NA",]
+```
+
+
+
+# BGC annotation
+```{r}
+df_bgc <- read.delim2("../../03.BGC_family/All_130051_BGCs_family_add_0.8_deduplication.tsv")
+df_activity <- read.delim2("../../04.BGC_Function/predicted_compound_activity.tsv", sep = " ")
+df_bgc_activity <- merge(df_bgc, df_activity, by="bgc_id", all.x = TRUE)
+
+df_bgc_rep <- df_bgc_activity %>% filter(representative=="Y")
+typeII_bgc_list <- unique(df_ripps_pre[df_ripps_pre$Precursor_Class=="Class_II", ]$Representative_rename)
+# classI/II/III bacteriocins features extracted by BiG-SLiCE
+df_classI <- read.delim("./bgc_features_bigslice/classI_bacteriocin.domains.tsv")
+df_classII <- read.delim("./bgc_features_bigslice/classII_bacteriocin.domains.tsv")
+df_classIII <- read.delim("./bgc_features_bigslice/classIII_bacteriocin.domains.tsv")
+
+df_classI$bgc_ID <- paste("bgc", df_classI$bgc_id, sep = "")
+df_classI$classI <- ifelse(df_classI$row_sum>0, "Y", "N")
+df_classII$bgc_ID <- paste("bgc", df_classII$bgc_id, sep = "")
+df_classII$classII <- ifelse(df_classII$row_sum>0, "Y", "N")
+df_classIII$bgc_ID <- paste("bgc", df_classIII$bgc_id, sep = "")
+df_classIII$classIII <- ifelse(df_classIII$row_sum>0, "Y", "N")
+
+df_classI <- subset(df_classI, select=c(bgc_ID, classI))
+df_classII <- subset(df_classII, select=c(bgc_ID, classII))
+df_classIII <- subset(df_classIII, select=c(bgc_ID, classIII))
+
+names(df_classI) <- c("bgc_id", "classI")
+names(df_classII) <- c("bgc_id", "classII")
+names(df_classIII) <- c("bgc_id", "classIII")
+
+# all BGCs
+df_bgc_activity_m <- Reduce(function(x,y) merge(x = x, y = y, by = "bgc_id"), 
+                  list(df_bgc_activity, df_classI, df_classII, df_classIII))
+
+df_bgc_activity_m$BGC_Class_re2 <- NA
+for (i in 1:nrow(df_bgc_activity_m)){
+  if (df_bgc_activity_m$BGC_Class_re[i]=="RiPPs"){
+    if (df_bgc_activity_m$RiPPs_Class[i]=="RiPP-like"){
+      if (df_bgc_activity_m$classII[i]=="Y"){df_bgc_activity_m$BGC_Class_re2[i] <- "Class II bacteriocins"}
+      else {df_bgc_activity_m$BGC_Class_re2[i] <- "Others"}
+    }else
+      {df_bgc_activity_m$BGC_Class_re2[i] <- df_bgc_activity_m$RiPPs_Re[i]}
+    }else
+    {df_bgc_activity_m$BGC_Class_re2[i] <- df_bgc_activity_m$BGC_Class_re[i]}
+}
+
+write.table(df_bgc_activity_m, file="All_130051_LAB_BGCs.tsv", quote = FALSE, sep = "\t")
+
+# show the number of bacteriocins from RiPP-likes
+df_plot <- data.frame(type=c("class I", "class II", "class III"),
+                      count=c(nrow(df_bgc_activity_m[df_bgc_activity_m$Type=="RiPP-like" & df_bgc_activity_m$classI=="Y", ]),
+                      nrow(df_bgc_activity_m[df_bgc_activity_m$Type=="RiPP-like" & df_bgc_activity_m$classII=="Y", ]),
+                      nrow(df_bgc_activity_m[df_bgc_activity_m$Type=="RiPP-like" & df_bgc_activity_m$classIII=="Y", ])))
+p  <- ggplot(df_plot, aes(x=type, y=count))+
+      geom_bar(stat="identity")+
+      theme_bw()+
+      ylab("BGC count")+
+      xlab("")+
+      coord_flip()+
+      geom_text(aes(label=count), vjust=0, color="red", size=3.5)
+ggsave(filename = "Barplot_class I_II_III bacteriocin number.pdf",plot = p, useDingbats = FALSE, width = 6, height = 4)
+
+
+df_bgc_rep_m <- df_bgc_activity_m %>% filter(representative == "Y")
+
+```
+
+
+
+# obtain GCF information
+```{r}
+# the BGC class > 80% was selected as the representative of a BGC family
+df_gcf_bgc_prop <- prop.table(table(df_bgc_activity_m$BGC_Class_re2, df_bgc_activity_m$BGC_family),2) %>% as.data.frame.matrix() %>% t() %>% as.data.frame()
+
+df_gcf_bgc_prop$representative_class <- NA
+for (i in 1:nrow(df_gcf_bgc_prop)) {
+  rep_class <- names(df_gcf_bgc_prop)[1:11][df_gcf_bgc_prop[i,1:11]>0.8]
+  df_gcf_bgc_prop$representative_class[i] <- ifelse(identical(rep_class, character(0)), "Others", rep_class)
+}
+df_gcf_bgc_prop$GCF <- rownames(df_gcf_bgc_prop)
+
+write.table(df_gcf_bgc_prop, file = "2849_GCF_BGC_class_proportion.tsv", row.names = FALSE, sep = "\t")
+
+# # add class II bacteriocins
+# df_ripps_pre <- read.xlsx("../../13.ClassII_bacteriocin_precursors/All_193467_precursors_detected_info.xlsx")
+# 
+# df_ripps_prop <- prop.table(table(df_ripps_pre$Precursor_Class, df_ripps_pre$BGC_family),2) %>% as.data.frame.matrix() %>% t() %>% as.data.frame()
+# 
+# # if a GCF contain >80% classII bacteriocins, attribute this GCF as class II bacteriocins
+# df_ripps_prop$classII_bacteriocins <- NA
+# for (i in 1:nrow(df_ripps_prop)) {
+#   rep_class <- names(df_ripps_prop)[1:4][df_ripps_prop[i,1:4]>0.8]
+#   df_ripps_prop$classII_bacteriocins[i] <- ifelse(identical(rep_class, character(0)), "inconsistent", rep_class)
+# }
+# df_ripps_prop$GCF <- rownames(df_ripps_prop)
+# 
+# df_gcf_annotation_final <- merge(df_gcf_bgc_prop[,c("GCF","representative_class")], df_ripps_prop[,c("GCF","classII_bacteriocins")], by = "GCF", all.x = TRUE)
+# rownames(df_gcf_annotation_final) <- df_gcf_annotation_final$GCF
+# df_gcf_annotation_final <- subset(df_gcf_annotation_final, select = -GCF)
+# df_gcf_annotation_final$classII_bacteriocins <- ifelse(df_gcf_annotation_final$classII_bacteriocins=="Class_II","Y","N")
+# df_gcf_annotation_final$classII_bacteriocins[is.na(df_gcf_annotation_final$classII_bacteriocins)] <- "N"
+
+# deterimine whether BGCs are specific to genus, species, strains
+df_gcf_genus <- table(unique(df_bgc[,c("genus", "BGC_family")])) %>% as.data.frame.matrix() %>% t() %>% as.data.frame()
+df_gcf_genus_no <- rowSums(df_gcf_genus>0) %>% as.data.frame()
+names(df_gcf_genus_no) <- "genus.no"
+df_gcf_genus_no$genus_type <- ifelse(df_gcf_genus_no$genus.no==1, "specific", "cross")
+
+df_gcf_species <- table(unique(df_bgc[,c("species", "BGC_family")])) %>% as.data.frame.matrix() %>% t() %>% as.data.frame()
+df_gcf_species_no <- rowSums(df_gcf_species>0) %>% as.data.frame()
+names(df_gcf_species_no) <- "species.no"
+df_gcf_species_no$species_type <- ifelse(df_gcf_species_no$species.no==1, "specific", "cross")
+
+df_gcf_genome <- table(unique(df_bgc[,c("Genome", "BGC_family")])) %>% as.data.frame.matrix() %>% t() %>% as.data.frame()
+df_gcf_genome_no <- rowSums(df_gcf_genome >0) %>% as.data.frame()
+names(df_gcf_genome_no) <- "genome.no"
+df_gcf_genome_no$genome_type <- ifelse(df_gcf_genome_no$genome.no==1, "specific", "cross")
+
+df_cross <- cbind(df_gcf_genus_no, df_gcf_species_no, df_gcf_genome_no)
+df_cross$GCF <- rownames(df_cross)
+df_gcf_annotation_final$GCF <- rownames(df_gcf_annotation_final)
+df_gcf_annotation_final_m <- merge(df_gcf_annotation_final, df_cross[,c("GCF", "genus_type", "species_type", "genome_type")], by="GCF", all.x = TRUE)
+
+df_gcf_annotation_final <- subset(df_gcf_annotation_final, select = -GCF)
+```
+
+
+# BGCs in each body sites
+```{r}
+#########################################################################
+# BGC Counts
+#########################################################################
+df_bgc_present_Anterior_nares_f2 <- df_bgc_present_Anterior_nares_f %>% filter(rowSums(df_bgc_present_Anterior_nares_f)>0)
+df_bgc_present_supragingival_plaque_f2 <- df_bgc_present_supragingival_plaque_f %>% filter(rowSums(df_bgc_present_supragingival_plaque_f)>0)
+df_bgc_present_buccal_mucosa_f2 <- df_bgc_present_buccal_mucosa_f %>% filter(rowSums(df_bgc_present_buccal_mucosa_f)>0)
+df_bgc_present_tongue_dorsum_f2 <- df_bgc_present_tongue_dorsum_f %>% filter(rowSums(df_bgc_present_tongue_dorsum_f)>0)
+df_bgc_present_posterior_fornix_f2 <- df_bgc_present_posterior_fornix_f %>% filter(rowSums(df_bgc_present_posterior_fornix_f)>0)
+df_bgc_present_stool_f2 <- df_bgc_present_stool_f %>% filter(rowSums(df_bgc_present_stool_f)>0)
+
+df_bgc_present_Anterior_nares_f2$BGC <- rownames(df_bgc_present_Anterior_nares_f2)
+df_bgc_present_supragingival_plaque_f2$BGC <- rownames(df_bgc_present_supragingival_plaque_f2)
+df_bgc_present_buccal_mucosa_f2$BGC <- rownames(df_bgc_present_buccal_mucosa_f2)
+df_bgc_present_tongue_dorsum_f2$BGC <- rownames(df_bgc_present_tongue_dorsum_f2)
+df_bgc_present_posterior_fornix_f2$BGC <- rownames(df_bgc_present_posterior_fornix_f2)
+df_bgc_present_stool_f2$BGC <- rownames(df_bgc_present_stool_f2)
+
+df_bgc_present_Anterior_nares_f3 <- merge(df_bgc_present_Anterior_nares_f2, df_bgc_rep_m[ ,c("Representative_rename", "BGC_Class_re2")], by.x = "BGC", by.y = "Representative_rename", all.x = TRUE)
+df_bgc_present_supragingival_plaque_f3 <- merge(df_bgc_present_supragingival_plaque_f2, df_bgc_rep_m[ ,c("Representative_rename", "BGC_Class_re2")], by.x = "BGC", by.y = "Representative_rename", all.x = TRUE)
+df_bgc_present_buccal_mucosa_f3 <- merge(df_bgc_present_buccal_mucosa_f2, df_bgc_rep_m[ ,c("Representative_rename", "BGC_Class_re2")], by.x = "BGC", by.y = "Representative_rename", all.x = TRUE)
+df_bgc_present_tongue_dorsum_f3 <- merge(df_bgc_present_tongue_dorsum_f2, df_bgc_rep_m[ ,c("Representative_rename", "BGC_Class_re2")], by.x = "BGC", by.y = "Representative_rename", all.x = TRUE)
+df_bgc_present_posterior_fornix_f3 <- merge(df_bgc_present_posterior_fornix_f2, df_bgc_rep_m[ ,c("Representative_rename", "BGC_Class_re2")], by.x = "BGC", by.y = "Representative_rename", all.x = TRUE)
+df_bgc_present_stool_f3 <- merge(df_bgc_present_stool_f2, df_bgc_rep_m[ ,c("Representative_rename", "BGC_Class_re2")], by.x = "BGC", by.y = "Representative_rename", all.x = TRUE)
+
+df_bgc_present_Anterior_nares_f3 <- df_bgc_present_Anterior_nares_f3 %>% subset(select=-BGC)
+df_bgc_present_supragingival_plaque_f3 <- df_bgc_present_supragingival_plaque_f3 %>% subset(select=-BGC)
+df_bgc_present_buccal_mucosa_f3 <- df_bgc_present_buccal_mucosa_f3 %>% subset(select=-BGC)
+df_bgc_present_tongue_dorsum_f3 <- df_bgc_present_tongue_dorsum_f3 %>% subset(select=-BGC)
+df_bgc_present_posterior_fornix_f3 <- df_bgc_present_posterior_fornix_f3 %>% subset(select=-BGC)
+df_bgc_present_stool_f3 <- df_bgc_present_stool_f3 %>% subset(select=-BGC)
+
+df_bgc_present_Anterior_nares_f3_no <- aggregate(.~BGC_Class_re2, df_bgc_present_Anterior_nares_f3, sum)
+df_bgc_present_supragingival_plaque_f3_no <- aggregate(.~BGC_Class_re2, df_bgc_present_supragingival_plaque_f3, sum)
+df_bgc_present_buccal_mucosa_f3_no <- aggregate(.~BGC_Class_re2, df_bgc_present_buccal_mucosa_f3, sum)
+df_bgc_present_tongue_dorsum_f3_no <- aggregate(.~BGC_Class_re2, df_bgc_present_tongue_dorsum_f3, sum)
+df_bgc_present_posterior_fornix_f3_no <- aggregate(.~BGC_Class_re2, df_bgc_present_posterior_fornix_f3, sum)
+df_bgc_present_stool_f3_no <- aggregate(.~BGC_Class_re2, df_bgc_present_stool_f3, sum)
+
+df_bgc_present_Anterior_nares_f3_no_melt <- reshape2::melt(df_bgc_present_Anterior_nares_f3_no, id.vars="BGC_Class_re2")
+df_bgc_present_supragingival_plaque_f3_melt <- reshape2::melt(df_bgc_present_supragingival_plaque_f3_no, id.vars="BGC_Class_re2")
+df_bgc_present_buccal_mucosa_f3_no_melt <- reshape2::melt(df_bgc_present_buccal_mucosa_f3_no, id.vars="BGC_Class_re2")
+df_bgc_present_tongue_dorsum_f3_no_melt <- reshape2::melt(df_bgc_present_tongue_dorsum_f3_no, id.vars="BGC_Class_re2")
+df_bgc_present_posterior_fornix_f3_no_melt <- reshape2::melt(df_bgc_present_posterior_fornix_f3_no, id.vars="BGC_Class_re2")
+df_bgc_present_stool_f3_no_melt <- reshape2::melt(df_bgc_present_stool_f3_no, id.vars="BGC_Class_re2")
+
+df_bgc_present_Anterior_nares_f3_no_melt$bodysite <- "Anterior_nares"
+df_bgc_present_supragingival_plaque_f3_melt$bodysite <- "Supragingival_plaque"
+df_bgc_present_buccal_mucosa_f3_no_melt$bodysite <- "Buccal_mucosa"
+df_bgc_present_tongue_dorsum_f3_no_melt$bodysite <- "Tongue_dorsum"
+df_bgc_present_posterior_fornix_f3_no_melt$bodysite <- "Posterior_fornix"
+df_bgc_present_stool_f3_no_melt$bodysite <- "Stool"
+
+df_bgc_present_overall <- rbind(df_bgc_present_Anterior_nares_f3_no_melt, df_bgc_present_supragingival_plaque_f3_melt, df_bgc_present_buccal_mucosa_f3_no_melt,
+                                df_bgc_present_tongue_dorsum_f3_no_melt, df_bgc_present_posterior_fornix_f3_no_melt, df_bgc_present_stool_f3_no_melt)
+df_bgc_present_overall$bodysite <- factor(df_bgc_present_overall$bodysite, levels = c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum"))
+df_bgc_present_overall$BGC_Class_re2 <- factor(df_bgc_present_overall$BGC_Class_re2, levels = c("NRPS", "T3PKS", "Terpene", "cyclic-lactone-autoinducer","lanthipeptide","LAP","lassopeptide","Class II bacteriocins","RRE-containing","rSAM-Modified","Others"))
+cols_eleven <- c("#ff9d00", "#0039ff", "#8840a5", "#fffa00", "#00fd00", "#000000", "#e1aa7a",
+                 "#ff0000", "#985c28", "#ff25ff", "#d5d6d5")
+calc_boxplot_stat <- function(x) {
+  coef <- 1.5
+  n <- sum(!is.na(x))
+  # calculate quantiles
+  stats <- quantile(x, probs = c(0.0, 0.25, 0.5, 0.75, 1.0))
+  names(stats) <- c("ymin", "lower", "middle", "upper", "ymax")
+  iqr <- diff(stats[c(2, 4)])
+  # set whiskers
+  outliers <- x < (stats[2] - coef * iqr) | x > (stats[4] + coef * iqr)
+  if (any(outliers)) {
+    stats[c(1, 5)] <- range(c(stats[2:4], x[!outliers]), na.rm = TRUE)
+  }
+  return(stats)
+}
+
+p_bgc_present_overall <- ggplot(df_bgc_present_overall, aes(x=BGC_Class_re2, y=value, fill=BGC_Class_re2))+
+                    stat_summary(fun.data = calc_boxplot_stat, geom="boxplot")+
+                    facet_wrap(vars(bodysite), nrow = 2)+
+                    theme_bw()+
+                    xlab("")+
+                    ylab("Number of BGCs detected in metagenomes")+
+                    scale_fill_manual(values = cols_eleven)+
+                    theme(axis.text.x = element_blank(),
+                          axis.ticks.x = element_blank())
+                    
+ggsave(filename = "figure_BCs_counts_in_differet_body_sites.pdf",plot = p_bgc_present_overall, useDingbats = FALSE, width = 10, height = 4)
+
+#########################################################################
+# BGC abundance
+#########################################################################
+df_bgc_nor_Anterior_nares_c <- df_bgc_nor_Anterior_nares_f
+df_bgc_nor_supragingival_plaque_c <- df_bgc_nor_supragingival_plaque_f
+df_bgc_nor_buccal_mucosa_c <- df_bgc_nor_buccal_mucosa_f
+df_bgc_nor_tongue_dorsum_c <- df_bgc_nor_tongue_dorsum_f
+df_bgc_nor_posterior_fornix_c <- df_bgc_nor_posterior_fornix_f
+df_bgc_nor_stool_c <- df_bgc_nor_stool_f
+
+# all detected BGC number
+df_BGC_merge <- Reduce(function(x,y) merge(x = x, y = y, by = "GCF", all=TRUE), 
+                    list(df_bgc_nor_Anterior_nares_c,
+                         df_bgc_nor_supragingival_plaque_c,
+                         df_bgc_nor_buccal_mucosa_c, 
+                         df_bgc_nor_tongue_dorsum_c,
+                         df_bgc_nor_posterior_fornix_c,
+                         df_bgc_nor_stool_c))
+rownames(df_BGC_merge) <- df_BGC_merge$GCF
+df_BGC_merge <- subset(df_BGC_merge, select = -GCF)
+df_BGC_merge <- df_BGC_merge[rowSums(df_BGC_merge)>0,]
+
+
+df_bgc_nor_Anterior_nares_cm <- merge(df_bgc_nor_Anterior_nares_c, df_bgc_rep_m[ ,c("Representative_rename", "BGC_Class_re2")], by.x = "GCF", by.y = "Representative_rename", all.x = TRUE)
+df_bgc_nor_supragingival_plaque_cm <- merge(df_bgc_nor_supragingival_plaque_c, df_bgc_rep_m[ ,c("Representative_rename", "BGC_Class_re2")], by.x = "GCF", by.y = "Representative_rename", all.x = TRUE)
+df_bgc_nor_buccal_mucosa_cm <- merge(df_bgc_nor_buccal_mucosa_c, df_bgc_rep_m[ ,c("Representative_rename", "BGC_Class_re2")], by.x = "GCF", by.y = "Representative_rename", all.x = TRUE)
+df_bgc_nor_tongue_dorsum_cm <- merge(df_bgc_nor_tongue_dorsum_c, df_bgc_rep_m[ ,c("Representative_rename", "BGC_Class_re2")], by.x = "GCF", by.y = "Representative_rename", all.x = TRUE)
+df_bgc_nor_posterior_fornix_cm <- merge(df_bgc_nor_posterior_fornix_c, df_bgc_rep_m[ ,c("Representative_rename", "BGC_Class_re2")], by.x = "GCF", by.y = "Representative_rename", all.x = TRUE)
+df_bgc_nor_stool_cm <- merge(df_bgc_nor_stool_c, df_bgc_rep_m[ ,c("Representative_rename", "BGC_Class_re2")], by.x = "GCF", by.y = "Representative_rename", all.x = TRUE)
+
+df_bgc_nor_Anterior_nares_cm <- df_bgc_nor_Anterior_nares_cm %>% subset(select=-GCF)
+df_bgc_nor_supragingival_plaque_cm <- df_bgc_nor_supragingival_plaque_cm %>% subset(select=-GCF)
+df_bgc_nor_buccal_mucosa_cm <- df_bgc_nor_buccal_mucosa_cm %>% subset(select=-GCF)
+df_bgc_nor_tongue_dorsum_cm <- df_bgc_nor_tongue_dorsum_cm %>% subset(select=-GCF)
+df_bgc_nor_posterior_fornix_cm <- df_bgc_nor_posterior_fornix_cm %>% subset(select=-GCF)
+df_bgc_nor_stool_cm <- df_bgc_nor_stool_cm %>% subset(select=-GCF)
+
+df_bgc_nor_Anterior_nares_cm_no <- aggregate(.~BGC_Class_re2, df_bgc_nor_Anterior_nares_cm, sum)
+df_bgc_nor_supragingival_plaque_cm_no <- aggregate(.~BGC_Class_re2, df_bgc_nor_supragingival_plaque_cm, sum)
+df_bgc_nor_buccal_mucosa_cm_no <- aggregate(.~BGC_Class_re2, df_bgc_nor_buccal_mucosa_cm, sum)
+df_bgc_nor_tongue_dorsum_cm_no <- aggregate(.~BGC_Class_re2, df_bgc_nor_tongue_dorsum_cm, sum)
+df_bgc_nor_posterior_fornix_cm_no <- aggregate(.~BGC_Class_re2, df_bgc_nor_posterior_fornix_cm, sum)
+df_bgc_nor_stool_cm_no <- aggregate(.~BGC_Class_re2, df_bgc_nor_stool_cm, sum)
+
+df_bgc_nor_Anterior_nares_cm_no_melt <- reshape2::melt(df_bgc_nor_Anterior_nares_cm_no, id.vars="BGC_Class_re2")
+df_bgc_nor_supragingival_plaque_cm_no_melt <- reshape2::melt(df_bgc_nor_supragingival_plaque_cm_no, id.vars="BGC_Class_re2")
+df_bgc_nor_buccal_mucosa_cm_no_melt <- reshape2::melt(df_bgc_nor_buccal_mucosa_cm_no, id.vars="BGC_Class_re2")
+df_bgc_nor_tongue_dorsum_cm_no_melt <- reshape2::melt(df_bgc_nor_tongue_dorsum_cm_no, id.vars="BGC_Class_re2")
+df_bgc_nor_posterior_fornix_cm_no_melt <- reshape2::melt(df_bgc_nor_posterior_fornix_cm_no, id.vars="BGC_Class_re2")
+df_bgc_nor_stool_cm_no_melt <- reshape2::melt(df_bgc_nor_stool_cm_no, id.vars="BGC_Class_re2")
+
+df_bgc_nor_Anterior_nares_cm_no_melt$bodysite <- "Anterior_nares"
+df_bgc_nor_supragingival_plaque_cm_no_melt$bodysite <- "Supragingival_plaque"
+df_bgc_nor_buccal_mucosa_cm_no_melt$bodysite <- "Buccal_mucosa"
+df_bgc_nor_tongue_dorsum_cm_no_melt$bodysite <- "Tongue_dorsum"
+df_bgc_nor_posterior_fornix_cm_no_melt$bodysite <- "Posterior_fornix"
+df_bgc_nor_stool_cm_no_melt$bodysite <- "Stool"
+
+df_bgc_abu <- rbind(df_bgc_nor_Anterior_nares_cm_no_melt, df_bgc_nor_supragingival_plaque_cm_no_melt, df_bgc_nor_buccal_mucosa_cm_no_melt,
+                                df_bgc_nor_tongue_dorsum_cm_no_melt, df_bgc_nor_posterior_fornix_cm_no_melt, df_bgc_nor_stool_cm_no_melt)
+df_bgc_abu$bodysite <- factor(df_bgc_abu$bodysite, levels = c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum"))
+df_bgc_abu$BGC_Class_re2 <- factor(df_bgc_abu$BGC_Class_re2, levels = c("NRPS", "T3PKS", "Terpene", "cyclic-lactone-autoinducer","lanthipeptide","LAP","lassopeptide","Class II bacteriocins","RRE-containing","rSAM-Modified","Others"))
+cols_eleven <- c("#ff9d00", "#0039ff", "#8840a5", "#fffa00", "#00fd00", "#000000", "#e1aa7a",
+                 "#ff0000", "#985c28", "#ff25ff", "#d5d6d5")
+
+p_bgc_abu <- ggplot(df_bgc_abu, aes(x=BGC_Class_re2, y=value, fill=BGC_Class_re2))+
+                    stat_summary(fun.data = calc_boxplot_stat, geom="boxplot")+
+                    facet_wrap(vars(bodysite), nrow = 2)+
+                    theme_bw()+
+                    xlab("")+
+                    ylab("Number of BGCs detected in metagenomes")+
+                    scale_fill_manual(values = cols_eleven)+
+                    theme(axis.text.x = element_blank(),axis.ticks.x = element_blank())
+                    #theme(axis.text.x = element_text(angle = 45),axis.ticks.x = element_blank(), legend.position = "none")
+
+
+ggsave(filename = "figure_BCs_Abundance_in_differet_body_sites.pdf",plot = p_bgc_abu, useDingbats = FALSE, width = 10, height = 4)
+
+
+```
+
+
+
+# BGC activity in each body site
+```{r}
+df_bgc_present_Anterior_nares_f2$BGC <- rownames(df_bgc_present_Anterior_nares_f2)
+df_bgc_present_supragingival_plaque_f2$BGC <- rownames(df_bgc_present_supragingival_plaque_f2)
+df_bgc_present_buccal_mucosa_f2$BGC <- rownames(df_bgc_present_buccal_mucosa_f2)
+df_bgc_present_tongue_dorsum_f2$BGC <- rownames(df_bgc_present_tongue_dorsum_f2)
+df_bgc_present_posterior_fornix_f2$BGC <- rownames(df_bgc_present_posterior_fornix_f2)
+df_bgc_present_stool_f2$BGC <- rownames(df_bgc_present_stool_f2)
+
+df_bgc_present_Anterior_nares_f3 <- merge(df_bgc_present_Anterior_nares_f2, df_bgc_rep_m[ ,c("Representative_rename", "combined_activity")], by.x = "BGC", by.y = "Representative_rename", all.x = TRUE)
+df_bgc_present_supragingival_plaque_f3 <- merge(df_bgc_present_supragingival_plaque_f2, df_bgc_rep_m[ ,c("Representative_rename", "combined_activity")], by.x = "BGC", by.y = "Representative_rename", all.x = TRUE)
+df_bgc_present_buccal_mucosa_f3 <- merge(df_bgc_present_buccal_mucosa_f2, df_bgc_rep_m[ ,c("Representative_rename", "combined_activity")], by.x = "BGC", by.y = "Representative_rename", all.x = TRUE)
+df_bgc_present_tongue_dorsum_f3 <- merge(df_bgc_present_tongue_dorsum_f2, df_bgc_rep_m[ ,c("Representative_rename", "combined_activity")], by.x = "BGC", by.y = "Representative_rename", all.x = TRUE)
+df_bgc_present_posterior_fornix_f3 <- merge(df_bgc_present_posterior_fornix_f2, df_bgc_rep_m[ ,c("Representative_rename", "combined_activity")], by.x = "BGC", by.y = "Representative_rename", all.x = TRUE)
+df_bgc_present_stool_f3 <- merge(df_bgc_present_stool_f2, df_bgc_rep_m[ ,c("Representative_rename", "combined_activity")], by.x = "BGC", by.y = "Representative_rename", all.x = TRUE)
+
+df_bgc_present_Anterior_nares_f3 <- df_bgc_present_Anterior_nares_f3 %>% subset(select=-BGC)
+df_bgc_present_supragingival_plaque_f3 <- df_bgc_present_supragingival_plaque_f3 %>% subset(select=-BGC)
+df_bgc_present_buccal_mucosa_f3 <- df_bgc_present_buccal_mucosa_f3 %>% subset(select=-BGC)
+df_bgc_present_tongue_dorsum_f3 <- df_bgc_present_tongue_dorsum_f3 %>% subset(select=-BGC)
+df_bgc_present_posterior_fornix_f3 <- df_bgc_present_posterior_fornix_f3 %>% subset(select=-BGC)
+df_bgc_present_stool_f3 <- df_bgc_present_stool_f3 %>% subset(select=-BGC)
+
+df_bgc_present_Anterior_nares_f3_no <- aggregate(.~combined_activity, df_bgc_present_Anterior_nares_f3, sum)
+df_bgc_present_supragingival_plaque_f3_no <- aggregate(.~combined_activity, df_bgc_present_supragingival_plaque_f3, sum)
+df_bgc_present_buccal_mucosa_f3_no <- aggregate(.~combined_activity, df_bgc_present_buccal_mucosa_f3, sum)
+df_bgc_present_tongue_dorsum_f3_no <- aggregate(.~combined_activity, df_bgc_present_tongue_dorsum_f3, sum)
+df_bgc_present_posterior_fornix_f3_no <- aggregate(.~combined_activity, df_bgc_present_posterior_fornix_f3, sum)
+df_bgc_present_stool_f3_no <- aggregate(.~combined_activity, df_bgc_present_stool_f3, sum)
+
+df_bgc_present_Anterior_nares_f3_no_melt <- reshape2::melt(df_bgc_present_Anterior_nares_f3_no, id.vars="combined_activity")
+df_bgc_present_supragingival_plaque_f3_melt <- reshape2::melt(df_bgc_present_supragingival_plaque_f3_no, id.vars="combined_activity")
+df_bgc_present_buccal_mucosa_f3_no_melt <- reshape2::melt(df_bgc_present_buccal_mucosa_f3_no, id.vars="combined_activity")
+df_bgc_present_tongue_dorsum_f3_no_melt <- reshape2::melt(df_bgc_present_tongue_dorsum_f3_no, id.vars="combined_activity")
+df_bgc_present_posterior_fornix_f3_no_melt <- reshape2::melt(df_bgc_present_posterior_fornix_f3_no, id.vars="combined_activity")
+df_bgc_present_stool_f3_no_melt <- reshape2::melt(df_bgc_present_stool_f3_no, id.vars="combined_activity")
+
+df_bgc_present_Anterior_nares_f3_no_melt$bodysite <- "Anterior_nares"
+df_bgc_present_supragingival_plaque_f3_melt$bodysite <- "Supragingival_plaque"
+df_bgc_present_buccal_mucosa_f3_no_melt$bodysite <- "Buccal_mucosa"
+df_bgc_present_tongue_dorsum_f3_no_melt$bodysite <- "Tongue_dorsum"
+df_bgc_present_posterior_fornix_f3_no_melt$bodysite <- "Posterior_fornix"
+df_bgc_present_stool_f3_no_melt$bodysite <- "Stool"
+
+df_bgc_present_overall <- rbind(df_bgc_present_Anterior_nares_f3_no_melt, df_bgc_present_supragingival_plaque_f3_melt, df_bgc_present_buccal_mucosa_f3_no_melt,
+                                df_bgc_present_tongue_dorsum_f3_no_melt, df_bgc_present_posterior_fornix_f3_no_melt, df_bgc_present_stool_f3_no_melt)
+df_bgc_present_overall$bodysite <- factor(df_bgc_present_overall$bodysite, levels = c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum"))
+df_bgc_present_overall$combined_activity <- factor(df_bgc_present_overall$combined_activity, levels = c("antibacterial", "cytotoxic", "antibacterial_AND_cytotoxic", "antibacterial_AND_antifungal","unknown"))
+cols_five <- c("#ff9d00", "#0039ff", "#8840a5", "#fffa00", "#d5d6d5")
+
+p_bgc_present_overall <- ggplot(df_bgc_present_overall, aes(x=combined_activity, y=value, fill=combined_activity))+
+                    geom_boxplot(outlier.size = 0.4)+
+                    facet_wrap(vars(bodysite), nrow = 2)+
+                    theme_bw()+
+                    xlab("")+
+                    ylab("Number of BGCs detected in metagenomes")+
+                    scale_fill_manual(values = cols_five)+
+                    theme(axis.text.x = element_blank(),
+                          axis.ticks.x = element_blank())
+                    
+#ggsave(filename = "figure_BCs_counts_in_differet_body_sites.pdf",plot = p_bgc_present_overall, useDingbats = FALSE, width = 10, height = 4)
+
+#####################################################################################
+# Proportion of overall BGCs in different body sites
+#####################################################################################
+df_pro_Anterior_nares <- table(df_bgc_present_Anterior_nares_f3$combined_activity) %>% prop.table() %>% as.data.frame()
+df_pro_supragingival_plaque <- table(df_bgc_present_supragingival_plaque_f3$combined_activity) %>% prop.table() %>% as.data.frame()
+df_pro_buccal_mucosa <- table(df_bgc_present_buccal_mucosa_f3$combined_activity) %>% prop.table() %>% as.data.frame()
+df_pro_tongue_dorsum <- table(df_bgc_present_tongue_dorsum_f3$combined_activity) %>% prop.table() %>% as.data.frame()
+df_pro_posterior_fornix <- table(df_bgc_present_posterior_fornix_f3$combined_activity) %>% prop.table() %>% as.data.frame()
+df_pro_stool <- table(df_bgc_present_stool_f3$combined_activity) %>% prop.table() %>% as.data.frame()
+
+df_pro_Anterior_nares$body_site <- "Anterior_nares"
+df_pro_supragingival_plaque$body_site <- "Supragingival_plaque"
+df_pro_buccal_mucosa$body_site <- "Buccal_mucosa"
+df_pro_tongue_dorsum$body_site <- "Tongue_dorsum"
+df_pro_posterior_fornix$body_site <- "Posterior_fornix"
+df_pro_stool$body_site <- "Stool"
+
+df_activity_pro <- rbind(df_pro_Anterior_nares, df_pro_supragingival_plaque, df_pro_buccal_mucosa,
+                         df_pro_tongue_dorsum, df_pro_posterior_fornix, df_pro_stool)
+df_activity_pro$body_site <- factor(df_activity_pro$body_site, levels = c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum"))
+df_activity_pro$Var1 <- factor(df_activity_pro$Var1, c("antibacterial", "cytotoxic", "antibacterial_AND_cytotoxic", "antibacterial_AND_antifungal","unknown"))
+
+cols_five
+
+p_activity <- ggplot(df_activity_pro, aes(x=body_site, y=Freq, fill=Var1))+
+                    geom_bar(stat="identity")+
+                    theme_bw()+
+                    xlab("")+
+                    ylab("Proportion of putative activity of BGC products")+
+                    scale_fill_manual(values = cols_five)+
+                    theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+ggsave(filename = "figure_BGCs_activity_in_differet_body_sites.pdf",plot = p_activity, useDingbats = FALSE, width = 8, height = 4)
+
+
+```
+
+
+
+# statistics for six body sites
+```{r}
+#######################################################
+# 1. Abundance in different body sites
+#######################################################
+sample_meta <- data.frame(sample=c(names(df_bgc_nor_Anterior_nares_f2)[2:ncol(df_bgc_nor_Anterior_nares_f2)],
+                                   names(df_bgc_nor_supragingival_plaque_f2)[2:ncol(df_bgc_nor_supragingival_plaque_f2)],
+                                   names(df_bgc_nor_buccal_mucosa_f2)[2:ncol(df_bgc_nor_buccal_mucosa_f2)],
+                                   names(df_bgc_nor_tongue_dorsum_f2)[2:ncol(df_bgc_nor_tongue_dorsum_f2)],
+                                   names(df_bgc_nor_posterior_fornix_f2)[2:ncol(df_bgc_nor_posterior_fornix_f2)],
+                                   names(df_bgc_nor_stool_f2)[2:ncol(df_bgc_nor_stool_f2)]),
+                          sites=c(rep("Anterior_nares", ncol(df_bgc_nor_Anterior_nares_f2)-1),
+                                  rep("Supragingival_plaque", ncol(df_bgc_nor_supragingival_plaque_f2)-1),
+                                  rep("Buccal_mucosa", ncol(df_bgc_nor_buccal_mucosa_f2)-1),
+                                  rep("Tongue_dorsum", ncol(df_bgc_nor_tongue_dorsum_f2)-1),
+                                  rep("Posterior_fornix", ncol(df_bgc_nor_posterior_fornix_f2)-1),
+                                  rep("Stool", ncol(df_bgc_nor_stool_f2)-1)))
+df_abundance_merge <- Reduce(function(x,y) merge(x = x, y = y, by = "GCF", all=TRUE), 
+                    list(df_bgc_nor_Anterior_nares_f2,
+                         df_bgc_nor_supragingival_plaque_f2,
+                         df_bgc_nor_buccal_mucosa_f2, 
+                         df_bgc_nor_tongue_dorsum_f2,
+                         df_bgc_nor_posterior_fornix_f2,
+                         df_bgc_nor_stool_f2))
+df_abundance_merge[is.na(df_abundance_merge)] <- 0
+rownames(df_abundance_merge) <- df_abundance_merge$GCF
+df_abundance_merge <- subset(df_abundance_merge, select=-GCF)
+df_abundance_merge <- df_abundance_merge[, sample_meta$sample]
+df_abundance_merge <- df_abundance_merge[rowSums(df_abundance_merge)>0,]
+identical(names(df_abundance_merge), sample_meta$sample)
+
+annotation_col <- data.frame(body_site = sample_meta$sites)
+rownames(annotation_col) <- sample_meta$sample
+annotation_row <- df_gcf_annotation_final[rownames(df_abundance_merge),]
+identical(rownames(annotation_row),rownames(df_abundance_merge))
+
+p_abundance <- pheatmap(as.matrix(log10(df_abundance_merge+0.00001)),
+                 #cellwidth = 2,
+                 #cellheight = 14,
+                 cluster_cols = FALSE,
+                 cluster_rows = TRUE,
+                 annotation_col = annotation_col,
+                 annotation_row = annotation_row,
+                 #annotation_colors = ann_colors,
+                 show_colnames = FALSE,
+                 show_rownames = FALSE,
+                 #border_color = "grey",
+                 gaps_col = c(66, 347, 413, 479, 648))
+
+pdf(file = "figures_610_GCFs_in_six_body_sites.pdf",,height = 18, width = 12)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+p_abundance
+dev.off()
+
+# fetch out top5 for each sites
+df_Anterior_nares_sum <- data.frame(GCF=df_bgc_nor_Anterior_nares_f2$GCF,
+                                    sum_abun=rowSums(df_bgc_nor_Anterior_nares_f2[,2:ncol(df_bgc_nor_Anterior_nares_f2)]))
+df_supragingival_plaque_sum <- data.frame(GCF=df_bgc_nor_supragingival_plaque_f2$GCF,
+                                    sum_abun=rowSums(df_bgc_nor_supragingival_plaque_f2[,2:ncol(df_bgc_nor_supragingival_plaque_f2)]))
+df_buccal_mucosa_sum <- data.frame(GCF=df_bgc_nor_buccal_mucosa_f2$GCF,
+                                    sum_abun=rowSums(df_bgc_nor_buccal_mucosa_f2[,2:ncol(df_bgc_nor_buccal_mucosa_f2)]))
+df_tongue_dorsum_sum <- data.frame(GCF=df_bgc_nor_tongue_dorsum_f2$GCF,
+                                    sum_abun=rowSums(df_bgc_nor_tongue_dorsum_f2[,2:ncol(df_bgc_nor_tongue_dorsum_f2)]))
+df_posterior_fornix_sum <- data.frame(GCF=df_bgc_nor_posterior_fornix_f2$GCF,
+                                    sum_abun=rowSums(df_bgc_nor_posterior_fornix_f2[,2:ncol(df_bgc_nor_posterior_fornix_f2)]))
+df_stool_sum <- data.frame(GCF=df_bgc_nor_stool_f2$GCF,
+                                    sum_abun=rowSums(df_bgc_nor_stool_f2[,2:ncol(df_bgc_nor_stool_f2)]))
+
+df_Anterior_nares_sum <- df_Anterior_nares_sum[order(df_Anterior_nares_sum$sum_abun, decreasing = TRUE), ]
+df_supragingival_plaque_sum <- df_supragingival_plaque_sum[order(df_supragingival_plaque_sum$sum_abun, decreasing = TRUE), ]
+df_buccal_mucosa_sum <- df_buccal_mucosa_sum[order(df_buccal_mucosa_sum$sum_abun, decreasing = TRUE), ]
+df_tongue_dorsum_sum <- df_tongue_dorsum_sum[order(df_tongue_dorsum_sum$sum_abun, decreasing = TRUE), ]
+df_posterior_fornix_sum <- df_posterior_fornix_sum[order(df_posterior_fornix_sum$sum_abun, decreasing = TRUE), ]
+df_stool_sum <- df_stool_sum[order(df_stool_sum$sum_abun, decreasing = TRUE), ]
+
+GCF_fetch <- c(df_Anterior_nares_sum$GCF[1:5], df_supragingival_plaque_sum$GCF[1:5], df_buccal_mucosa_sum$GCF[1:5],
+               df_tongue_dorsum_sum$GCF[1:5], df_posterior_fornix_sum$GCF[1:5], df_stool_sum$GCF[1:5]) %>% unique()
+
+f_pre_abu <- function(d_f, site){
+  df_tmp <- d_f[,2:ncol(d_f)]
+  df_tmp <- as.data.frame(sapply(df_tmp, as.numeric))
+  prevalence <- rowSums(df_tmp>0)/ncol(d_f)*100
+  median_abundance <- apply(df_tmp, 1, median)
+  df_site <- data.frame(genus = d_f[,1],
+                        prevalence = prevalence,
+                        abundance = median_abundance,
+                        body_site = site,
+                        stringsAsFactors = FALSE)
+  df_site <- df_site[df_site$prevalence != 0, ]
+  return(df_site)
+}
+
+df_fetch_Anterior_nares <- df_bgc_nor_Anterior_nares_f2[df_bgc_nor_Anterior_nares_f2$GCF %in% GCF_fetch, ]
+df_fetch_gut <- df_bgc_nor_stool_f2[df_bgc_nor_stool_f2$GCF %in% GCF_fetch, ]
+df_fetch_vaginal <- df_bgc_nor_posterior_fornix_f2[df_bgc_nor_posterior_fornix_f2$GCF %in% GCF_fetch, ]   
+df_fetch_oral <- df_bgc_nor_supragingival_plaque_f2[df_bgc_nor_supragingival_plaque_f2$GCF %in% GCF_fetch, ]
+df_fetch_Buccal_mucosa <- df_bgc_nor_buccal_mucosa_f2[df_bgc_nor_buccal_mucosa_f2$GCF %in% GCF_fetch, ]
+df_fetch_Tongue_dorsum <- df_bgc_nor_tongue_dorsum_f2[df_bgc_nor_tongue_dorsum_f2$GCF %in% GCF_fetch, ]
+
+df_fetch_Anterior_nares_abu_pre <- f_pre_abu(df_fetch_Anterior_nares, "Anterior_nares")
+df_fetch_gut_abu_pre <- f_pre_abu(df_fetch_gut, "Stool")
+df_fetch_vaginal_abu_pre <- f_pre_abu(df_fetch_vaginal, "Posterior_fornix")
+df_fetch_oral_abu_pre <- f_pre_abu(df_fetch_oral, "Supragingival_plaque")
+df_fetch_Buccal_mucosa_abu_pre <- f_pre_abu(df_fetch_Buccal_mucosa, "Buccal_mucosa")
+df_fetch_Tongue_dorsum_abu_pre <- f_pre_abu(df_fetch_Tongue_dorsum, "Tongue_dorsum")
+
+df_fetch_pre_abu_all <- rbind(df_fetch_Anterior_nares_abu_pre,
+                               df_fetch_gut_abu_pre,
+                               df_fetch_vaginal_abu_pre,
+                               df_fetch_oral_abu_pre,
+                               df_fetch_Buccal_mucosa_abu_pre,
+                               df_fetch_Tongue_dorsum_abu_pre)
+df_gcf_annotation_final$GCF <- rownames(df_gcf_annotation_final)
+df_fetch_pre_abu_all_m <- merge(df_fetch_pre_abu_all, df_gcf_annotation_final, by.x = "genus", by.y = "GCF", all.x = TRUE)
+df_fetch_pre_abu_all_m <- df_fetch_pre_abu_all_m[order(df_fetch_pre_abu_all_m$classII_bacteriocins, decreasing = TRUE),]
+df_fetch_pre_abu_all_m$genus <- factor(df_fetch_pre_abu_all_m$genus, levels = unique(df_fetch_pre_abu_all_m$genus))
+df_fetch_pre_abu_all_m$body_site <- factor(df_fetch_pre_abu_all_m$body_site, levels = rev(c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa", "Tongue_dorsum")))
+
+p_fetch <- ggplot(df_fetch_pre_abu_all_m, aes(body_site,genus))+
+            geom_point(aes(size=prevalence, color=abundance))+
+            scale_colour_gradient2(low="#008000",mid="#cc9900",high="#ff0000", midpoint=max(df_fetch_pre_abu_all_m$abundance)/2)+
+            coord_flip()+
+            theme_bw()+
+            xlab("")+
+            ylab("")+
+            theme(axis.text = element_text(color = "black", size = 12),
+                  axis.text.x = element_text(angle = 90, hjust = 1, vjust = 1))
+
+ggsave(filename = "figure_4C_top5_fetch_GCFs_prevalence_abundance_differet_body_sites.pdf",plot = p_fetch, useDingbats = FALSE, width = 7, height = 4)
+
+#######################################################
+# 2. The abundance and prevalence of different types of GCFs
+#######################################################
+annotation_row_re <- annotation_row
+annotation_row_re$class <- NA
+for (i in 1:nrow(annotation_row_re)){
+  if (annotation_row_re$representative_class[i] != "RiPPs"){annotation_row_re$class[i] <- annotation_row_re$representative_class[i]}
+  else{
+    if (annotation_row_re$classII_bacteriocins[i]=="Y"){annotation_row_re$class[i] <- "Class II bacteriocins"}
+    else {annotation_row_re$class[i] <- "RiPPs others"}
+  }
+}
+annotation_row_re$GCF <- rownames(annotation_row_re)
+df_bgc_nor_Anterior_nares_f3 <- df_bgc_nor_Anterior_nares_f2[rowSums(df_bgc_nor_Anterior_nares_f2[,2:ncol(df_bgc_nor_Anterior_nares_f2)])>0, ]
+df_bgc_nor_stool_f3 <- df_bgc_nor_stool_f2[rowSums(df_bgc_nor_stool_f2[,2:ncol(df_bgc_nor_stool_f2)])>0, ]
+df_bgc_nor_posterior_fornix_f3 <- df_bgc_nor_posterior_fornix_f2[rowSums(df_bgc_nor_posterior_fornix_f2[,2:ncol(df_bgc_nor_posterior_fornix_f2)])>0, ]
+df_bgc_nor_supragingival_plaque_f3 <- df_bgc_nor_supragingival_plaque_f2[rowSums(df_bgc_nor_supragingival_plaque_f2[,2:ncol(df_bgc_nor_supragingival_plaque_f2)])>0, ]
+df_bgc_nor_buccal_mucosa_f3 <- df_bgc_nor_buccal_mucosa_f2[rowSums(df_bgc_nor_buccal_mucosa_f2[,2:ncol(df_bgc_nor_buccal_mucosa_f2)])>0, ]
+df_bgc_nor_tongue_dorsum_f3 <- df_bgc_nor_tongue_dorsum_f2[rowSums(df_bgc_nor_tongue_dorsum_f2[,2:ncol(df_bgc_nor_tongue_dorsum_f2)])>0, ]
+
+df_bgc_nor_Anterior_nares_f3_m <- merge(df_bgc_nor_Anterior_nares_f3, annotation_row_re[,c("GCF","class")], by="GCF", all.x = TRUE)
+df_bgc_nor_stool_f3_m <- merge(df_bgc_nor_stool_f3, annotation_row_re[,c("GCF","class")], by="GCF", all.x = TRUE)
+df_bgc_nor_posterior_fornix_f3_m <- merge(df_bgc_nor_posterior_fornix_f3, annotation_row_re[,c("GCF","class")], by="GCF", all.x = TRUE)
+df_bgc_nor_supragingival_plaque_f3_m <- merge(df_bgc_nor_supragingival_plaque_f3, annotation_row_re[,c("GCF","class")], by="GCF", all.x = TRUE)
+df_bgc_nor_buccal_mucosa_f3_m <- merge(df_bgc_nor_buccal_mucosa_f3, annotation_row_re[,c("GCF","class")], by="GCF", all.x = TRUE)
+df_bgc_nor_tongue_dorsum_f3_m <- merge(df_bgc_nor_tongue_dorsum_f3, annotation_row_re[,c("GCF","class")], by="GCF", all.x = TRUE)
+
+df_bgc_nor_Anterior_nares_f3_m <- subset(df_bgc_nor_Anterior_nares_f3_m, select = -GCF)
+df_bgc_nor_stool_f3_m <- subset(df_bgc_nor_stool_f3_m, select = -GCF)
+df_bgc_nor_posterior_fornix_f3_m <- subset(df_bgc_nor_posterior_fornix_f3_m, select = -GCF)
+df_bgc_nor_supragingival_plaque_f3_m <- subset(df_bgc_nor_supragingival_plaque_f3_m, select = -GCF)
+df_bgc_nor_buccal_mucosa_f3_m <- subset(df_bgc_nor_buccal_mucosa_f3_m, select = -GCF)
+df_bgc_nor_tongue_dorsum_f3_m <- subset(df_bgc_nor_tongue_dorsum_f3_m, select = -GCF)
+
+df_bgc_nor_Anterior_nares_f3_m <- aggregate(.~class, df_bgc_nor_Anterior_nares_f3_m, sum)
+df_bgc_nor_stool_f3_m <- aggregate(.~class, df_bgc_nor_stool_f3_m, sum)
+df_bgc_nor_posterior_fornix_f3_m <- aggregate(.~class, df_bgc_nor_posterior_fornix_f3_m, sum)
+df_bgc_nor_supragingival_plaque_f3_m <- aggregate(.~class, df_bgc_nor_supragingival_plaque_f3_m, sum)
+df_bgc_nor_buccal_mucosa_f3_m <- aggregate(.~class, df_bgc_nor_buccal_mucosa_f3_m, sum)
+df_bgc_nor_tongue_dorsum_f3_m <- aggregate(.~class, df_bgc_nor_tongue_dorsum_f3_m, sum)
+
+f_abu_mean <- function(d_f, site){
+  df_tmp <- d_f[,2:ncol(d_f)]
+  df_tmp <- as.data.frame(sapply(df_tmp, as.numeric))
+  prevalence <- rowSums(df_tmp>0)/ncol(d_f)*100
+  median_abundance <- apply(df_tmp, 1, mean)
+  df_site <- data.frame(genus = d_f[,1],
+                        prevalence = prevalence,
+                        abundance = median_abundance,
+                        body_site = site,
+                        stringsAsFactors = FALSE)
+  df_site <- df_site[df_site$prevalence != 0, ]
+  return(df_site)
+}
+
+df_Anterior_nares_abu_gcf <- f_abu_mean(df_bgc_nor_Anterior_nares_f3_m, "Anterior_nares")
+df_gut_abu_gcf <- f_abu_mean(df_bgc_nor_stool_f3_m, "Stool")
+df_vaginal_abu_gcf <- f_abu_mean(df_bgc_nor_posterior_fornix_f3_m, "Posterior_fornix")
+df_oral_abu_gcf <- f_abu_mean(df_bgc_nor_supragingival_plaque_f3_m, "Supragingival_plaque")
+df_Buccal_mucosa_abu_gcf <- f_abu_mean(df_bgc_nor_buccal_mucosa_f3_m, "Buccal_mucosa")
+df_Tongue_dorsum_abu_gcf <- f_abu_mean(df_bgc_nor_tongue_dorsum_f3_m, "Tongue_dorsum")
+
+df_gcf_class_all <- rbind(df_Anterior_nares_abu_gcf,
+                               df_gut_abu_gcf,
+                               df_vaginal_abu_gcf,
+                               df_oral_abu_gcf,
+                               df_Buccal_mucosa_abu_gcf,
+                               df_Tongue_dorsum_abu_gcf)
+
+df_gcf_class_all$body_site <- factor(df_gcf_class_all$body_site, levels = rev(c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa", "Tongue_dorsum")))
+df_gcf_class_all$genus <- factor(df_gcf_class_all$genus, levels = c("NRPS","T3PKS","Terpene","Class II bacteriocins","RiPPs others","Others"))
+
+p_gcf_class <- ggplot(df_gcf_class_all, aes(body_site,genus))+
+            geom_point(aes(size=prevalence, color=abundance))+
+            scale_colour_gradient2(low="#008000",mid="#cc9900",high="#ff0000", midpoint=max(df_gcf_class_all$abundance)/2)+
+            coord_flip()+
+            theme_bw()+
+            xlab("")+
+            ylab("")+
+            theme(axis.text = element_text(color = "black", size = 12),
+                  axis.text.x = element_text(angle = 90, hjust = 1, vjust = 1))
+
+ggsave(filename = "figure_4C_top5_fetch_GCFs_prevalence_abundance_differet_body_sites.pdf",plot = p_fetch, useDingbats = FALSE, width = 7, height = 4)
+
+
+#######################################################
+# 2. PCA
+#######################################################
+df_abundance_merge_f <- df_abundance_merge[,colSums(df_abundance_merge)!=0] %>% t() %>% as.data.frame()
+pca <- prcomp(df_abundance_merge_f, scale=T)
+df_pca <- as.data.frame(pca$x)
+df_pca$sample <- rownames(df_pca)
+df_pca_merge <- merge(df_pca, sample_meta, by="sample", all.x = TRUE)
+df_pca_merge$sites <- factor(df_pca_merge$sites, levels = c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum"))
+summ <- summary(pca)
+my_col <- c("#ff9d00", "#0039ff", "#ff0000", "#00fd00", "#000000", "#d5d6d5")
+
+p_pca <- ggplot(df_pca_merge,aes(x=PC1,y=PC2,color=sites))+ 
+          geom_point()+
+          theme_base()+
+          scale_color_manual(values = my_col)+
+          xlab(paste0("PC1 (",round(summ$importance[2,1]*100,2),"%)"))+
+          ylab(paste0("PC2 (",round(summ$importance[2,2]*100,2),"%)"))+
+          theme(axis.text = element_text(size = 14, colour = "black"),
+                axis.title = element_text(size = 16, colour = "black"))
+p_pca
+
+#######################################################
+# 2. tSNE at GCFs
+#######################################################
+df_abundance_merge_f <- df_abundance_merge[, colSums(df_abundance_merge)>0]
+set.seed(123)
+perplexity <- floor((nrow(df_abundance_merge_f) -1) / 3)
+if (perplexity>0){
+  if (perplexity>30){
+    perplexity <- 30
+  }}
+tsne_out <- Rtsne(t(df_abundance_merge_f), perplexity=perplexity, check_duplicates = FALSE)
+data <- data.frame(tsne_out$Y, colnames(df_abundance_merge_f))
+names(data) <- c("tSNE1", "tSNE2", "sample")
+
+data_m <- merge(data, sample_meta, by = "sample", all.x = TRUE)
+data_m$sample <- factor(data_m$sample, levels = c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum"))
+
+p_tsne <- ggplot(data_m, aes(x = tSNE1, y = tSNE2, colour = sites)) + 
+                    geom_point(alpha = 1) +
+                    theme_base() +
+                    scale_color_manual(values = my_col)+
+                    #scale_color_d3(palette="category20") +
+                    theme(axis.text = element_text(size = 14, colour = "black"),
+                            axis.title = element_text(size = 16, colour = "black"),
+                            plot.title = element_text(hjust = 0.5),
+                            panel.border = element_blank())
+ggsave(filename = "figures_tsne_clustering_GCFs_in_different_body_sites.pdf", p_tsne, useDingbats = FALSE, width = 7.5,height = 5)
+
+# pairwise ANOSIM for raw data
+df_R_pvalue <- data.frame(group_1 = "str",
+                          group_2 = "str",
+                          Globe_R = 0.1,
+                          p_value = 0.1)
+df_abundance_merge_t <- df_abundance_merge_f %>% t() %>% as.data.frame()
+for (i in 1:5){
+  for (j in (i+1):6){
+    select_site <- unique(sample_meta$sites)[c(i, j)]
+    subset_data <- df_abundance_merge_t[intersect(rownames(df_abundance_merge_t), sample_meta[sample_meta$sites %in% select_site, ]$sample),]
+    subset_group <- sample_meta[sample_meta$sample %in% rownames(subset_data), ]
+    index <- factor(subset_group$sites, levels = rownames(subset_data))
+    subset_group <- subset_group[order(index),]
+    subset_dist <- vegdist(as.matrix(subset_data), method = "euclidean")
+    anosim_result <- anosim(subset_dist, subset_group$sites, permutations = 999)
+    summary(anosim_result)
+    #plot(anosim_result)
+    df_R_pvalue <- rbind(df_R_pvalue, c(unique(sample_meta$sites)[i],unique(sample_meta$sites)[j],anosim_result$statistic,anosim_result$signif))
+  }
+}
+df_R_pvalue <- df_R_pvalue[-1,]
+df_R_pvalue
+write.csv(df_R_pvalue, "pariwise_ANOSIM_test_different_body_sites_in_GCFs.csv")
+
+#######################################################
+# 2. tSNE at BGCs
+#######################################################
+df_abundance_merge_bgc <- Reduce(function(x,y) merge(x = x, y = y, by = "GCF", all=TRUE), 
+                    list(df_bgc_nor_Anterior_nares_f,
+                         df_bgc_nor_supragingival_plaque_f,
+                         df_bgc_nor_buccal_mucosa_f, 
+                         df_bgc_nor_tongue_dorsum_f,
+                         df_bgc_nor_posterior_fornix_f,
+                         df_bgc_nor_stool_f))
+df_abundance_merge_bgc[is.na(df_abundance_merge_bgc)] <- 0
+rownames(df_abundance_merge_bgc) <- df_abundance_merge_bgc$GCF
+df_abundance_merge_bgc <- subset(df_abundance_merge_bgc, select=-GCF)
+df_abundance_merge_bgc <- df_abundance_merge_bgc[, sample_meta$sample]
+df_abundance_merge_bgc <- df_abundance_merge_bgc[rowSums(df_abundance_merge_bgc)>0,]
+df_abundance_merge_bgc <- df_abundance_merge_bgc[, colSums(df_abundance_merge)>0]
+
+set.seed(123)
+perplexity <- floor((nrow(df_abundance_merge_bgc) -1) / 3)
+if (perplexity>0){
+  if (perplexity>30){
+    perplexity <- 30
+  }}
+tsne_out <- Rtsne(t(df_abundance_merge_bgc), perplexity=perplexity, check_duplicates = FALSE)
+data <- data.frame(tsne_out$Y, colnames(df_abundance_merge_bgc))
+names(data) <- c("tSNE1", "tSNE2", "sample")
+
+data_m <- merge(data, sample_meta, by = "sample", all.x = TRUE)
+data_m$sample <- factor(data_m$sample, levels = c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum"))
+
+p_tsne <- ggplot(data_m, aes(x = tSNE1, y = tSNE2, colour = sites)) + 
+                    geom_point(alpha = 1) +
+                    theme_base() +
+                    scale_color_manual(values = my_col)+
+                    #scale_color_d3(palette="category20") +
+                    theme(axis.text = element_text(size = 14, colour = "black"),
+                            axis.title = element_text(size = 16, colour = "black"),
+                            plot.title = element_text(hjust = 0.5),
+                            panel.border = element_blank())
+ggsave(filename = "figures_tsne_clustering_BGCs_in_different_body_sites.pdf", p_tsne, useDingbats = FALSE, width = 7.5,height = 5)
+
+# pairwise ANOSIM for raw data
+df_R_pvalue <- data.frame(group_1 = "str",
+                          group_2 = "str",
+                          Globe_R = 0.1,
+                          p_value = 0.1)
+df_abundance_merge_t <- df_abundance_merge_f %>% t() %>% as.data.frame()
+for (i in 1:5){
+  for (j in (i+1):6){
+    select_site <- unique(sample_meta$sites)[c(i, j)]
+    subset_data <- df_abundance_merge_t[intersect(rownames(df_abundance_merge_t), sample_meta[sample_meta$sites %in% select_site, ]$sample),]
+    subset_group <- sample_meta[sample_meta$sample %in% rownames(subset_data), ]
+    index <- factor(subset_group$sites, levels = rownames(subset_data))
+    subset_group <- subset_group[order(index),]
+    subset_dist <- vegdist(as.matrix(subset_data), method = "euclidean")
+    anosim_result <- anosim(subset_dist, subset_group$sites, permutations = 999)
+    summary(anosim_result)
+    #plot(anosim_result)
+    df_R_pvalue <- rbind(df_R_pvalue, c(unique(sample_meta$sites)[i],unique(sample_meta$sites)[j],anosim_result$statistic,anosim_result$signif))
+  }
+}
+df_R_pvalue <- df_R_pvalue[-1,]
+df_R_pvalue
+write.csv(df_R_pvalue, "pariwise_ANOSIM_test_at_BGCs_in_different_body_sites_in_GCFs.csv")
+
+#######################################################
+# 3. Venn plot for detected families
+#######################################################
+# upset plot
+v_Posterior_fornix <- data.frame(gcf=df_bgc_nor_posterior_fornix_f2$GCF[rowSums(df_bgc_nor_posterior_fornix_f2[,2:ncol(df_bgc_nor_posterior_fornix_f2)])>0],
+                                 Posterior_fornix=1, stringsAsFactors = FALSE)
+v_Stool <- data.frame(gcf=df_bgc_nor_stool_f2$GCF[rowSums(df_bgc_nor_stool_f2[,2:ncol(df_bgc_nor_stool_f2)])>0],
+                      Stool=1, stringsAsFactors = FALSE)
+v_Supragingival_plaque <- data.frame(gcf=df_bgc_nor_supragingival_plaque_f2$GCF[rowSums(df_bgc_nor_supragingival_plaque_f2[,2:ncol(df_bgc_nor_supragingival_plaque_f2)])>0],
+                                     Supragingival_plaque=1, stringsAsFactors = FALSE)
+v_Buccal_mucosa <- data.frame(gcf=df_bgc_nor_buccal_mucosa_f2$GCF[rowSums(df_bgc_nor_buccal_mucosa_f2[,2:ncol(df_bgc_nor_buccal_mucosa_f2)])>0],
+                              Buccal_mucosa=1, stringsAsFactors = FALSE)
+v_Tongue_dorsum <- data.frame(gcf=df_bgc_nor_tongue_dorsum_f2$GCF[rowSums(df_bgc_nor_tongue_dorsum_f2[,2:ncol(df_bgc_nor_tongue_dorsum_f2)])>0],
+                              Tongue_dorsum=1, stringsAsFactors = FALSE)
+v_Anterior_nares <- data.frame(gcf=df_bgc_nor_Anterior_nares_f2$GCF[rowSums(df_bgc_nor_Anterior_nares_f2[,2:ncol(df_bgc_nor_Anterior_nares_f2)])>0],
+                               Anterior_nares=1, stringsAsFactors = FALSE)
+
+v_all <- Reduce(function(x,y) merge(x = x, y = y, by = "gcf", all=TRUE), 
+                  list(v_Posterior_fornix, v_Stool, v_Supragingival_plaque, v_Buccal_mucosa, v_Tongue_dorsum, v_Anterior_nares))
+v_all[is.na(v_all)] <- 0
+
+pdf(file = "figure_4B_GCF_intersection_differet_body_sites.pdf",height = 4, width = 7)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+upset(v_all, sets = c("Posterior_fornix","Stool","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum","Anterior_nares"),
+            order.by = "freq", sets.x.label = "Number of GCF",
+      queries=list(list(query = intersects, params = list("Posterior_fornix","Stool","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum","Anterior_nares"), color = "red",active = T)))
+dev.off()
+
+
+# BGC types of 610 GCFs
+v_all_m <- merge(v_all, df_gcf_bgc_prop[,c("GCF","representative_class")], by.x="gcf", by.y="GCF", all.x = TRUE)
+
+write.table(v_all_m, file = "610_GCF_distribution_and_annotation.tsv", sep = "\t", row.names = FALSE)
+
+v_all_m_prop <- table(v_all_m$representative_class) %>% as.data.frame()
+v_all_m_prop$label <- paste(v_all_m_prop$Var1," (",v_all_m_prop$Freq, ", ",round(v_all_m_prop$Freq/sum(v_all_m_prop$Freq)*100,2),"%)", sep = "")
+
+v_all_m_prop$label <- factor(v_all_m_prop$label, levels = c("NRPS (69, 11.31%)", "T3PKS (71, 11.64%)", "Terpene (6, 0.98%)", "cyclic-lactone-autoinducer (5, 0.82%)","lanthipeptide (106, 17.38%)","LAP (13, 2.13%)","lassopeptide (19, 3.11%)","Class II bacteriocins (92, 15.08%)","RRE-containing (37, 6.07%)","rSAM-Modified (40, 6.56%)","Others (152, 24.92%)"))
+
+p_by_site <- ggplot(v_all_m_prop, aes(x="", y=Freq, fill=label)) +
+              geom_bar(stat="identity", width=1,color="white") +
+              coord_polar("y", start=0)+
+              scale_fill_manual(values = cols_eleven)+
+              guides(fill=guide_legend(title=NULL))+
+              theme_void() # remove background, grid, numeric labels
+
+ggsave(filename = "pie_chart_610_GCFs_BGC_Class.pdf",plot = p_by_site, useDingbats = FALSE, width = 6.5,height = 4)
+
+
+# overall pie plot
+no_gcf_bodysite <- rowSums(v_all[,2:ncol(v_all)]) %>% table() %>% as.data.frame()
+names(no_gcf_bodysite) <- c("number_bodysite", "gcf_count")
+label_value <- paste('(', round(no_gcf_bodysite$gcf_count/sum(no_gcf_bodysite$gcf_count) * 100, 2), '%)', sep = '')
+label <- paste(no_gcf_bodysite$number_bodysite, label_value, sep = ' ')
+
+no_gcf_bodysite <- no_gcf_bodysite %>% 
+                    arrange(desc(number_bodysite)) %>%
+                    mutate(prop = gcf_count / sum(no_gcf_bodysite$gcf_count) *100) %>%
+                    mutate(ypos = cumsum(prop)- 0.5*prop )
+no_gcf_bodysite$label <- paste(no_gcf_bodysite$number_bodysite, " (", round(no_gcf_bodysite$prop,2),"%)", sep = "")
+
+p_pie <- ggplot(no_gcf_bodysite, aes(x="", y=prop, fill=number_bodysite)) +
+        geom_bar(stat="identity", width=1, color="white") +
+        coord_polar("y", start=0) +
+        theme_void() + 
+        theme(legend.position="none") +
+        geom_text(aes(y = ypos, label = label), color = "white", size=6) +
+        scale_fill_brewer(palette="Set1")
+
+ggsave(filename = "piechart_different_body_sites.pdf",plot = p_pie, useDingbats = FALSE, width = 3,height = 3)
+
+# check whether site-specific GCFs are genus/species/strain-specific
+v_all$sum_sites <- rowSums(v_all[,2:7])
+v_all_m <- merge(v_all, df_gcf_annotation_final_m, by.x = "gcf", by.y = "GCF", all.x = TRUE)
+v_all_m$site_specific <- ifelse(v_all_m$sum_sites==1, "site-specific", "cross-site")
+
+chisq.test(table(v_all_m$site_specific, v_all_m$genus_type))
+chisq.test(table(v_all_m$site_specific, v_all_m$species_type))
+chisq.test(table(v_all_m$site_specific, v_all_m$genome_type))
+
+df_site_genus <- table(v_all_m$site_specific, v_all_m$genus_type) %>% as.data.frame()
+df_site_species <- table(v_all_m$site_specific, v_all_m$species_type) %>% as.data.frame()
+df_site_genome <- table(v_all_m$site_specific, v_all_m$genome_type) %>% as.data.frame()
+
+df_site_genus$Var1 <- factor(df_site_genus$Var1, levels = c("site-specific", "cross-site"))
+df_site_species$Var1 <- factor(df_site_species$Var1, levels = c("site-specific", "cross-site"))
+df_site_genome$Var1 <- factor(df_site_genome$Var1, levels = c("site-specific", "cross-site"))
+
+p_site_genus <- ggplot(df_site_genus, aes(x=Var1, y=Freq, fill=Var2))+
+                  geom_bar(stat="identity")+
+                  xlab("")+
+                  ylab("GCF count")+
+                  scale_fill_manual(values = c("blue","red"))+
+                  theme_bw()
+p_site_species <- ggplot(df_site_species, aes(x=Var1, y=Freq, fill=Var2))+
+                  geom_bar(stat="identity")+
+                  xlab("")+
+                  ylab("GCF count")+
+                  scale_fill_manual(values = c("blue","red"))+
+                  theme_bw()
+p_site_genome <- ggplot(df_site_genome, aes(x=Var1, y=Freq, fill=Var2))+
+                  geom_bar(stat="identity")+
+                  xlab("")+
+                  ylab("GCF count")+
+                  scale_fill_manual(values = c("blue","red"))+
+                  theme_bw()
+
+ggsave(filename = "barplot_site_specific_vs_genus_specific.pdf",plot = p_site_genus, useDingbats = FALSE, width = 3,height = 3)
+ggsave(filename = "barplot_site_specific_vs_species_specific.pdf",plot = p_site_species, useDingbats = FALSE, width = 3,height = 3)
+ggsave(filename = "barplot_site_specific_vs_genome_specific.pdf",plot = p_site_genome, useDingbats = FALSE, width = 3,height = 3)
+
+
+#######################################################
+# 4. GCF refraction curve
+#######################################################
+rf_Posterior_fornix <- subset(df_bgc_nor_posterior_fornix_f2, select = -GCF)
+rf_Posterior_fornix[rf_Posterior_fornix>0] <- 1
+rf_stool <- subset(df_bgc_nor_stool_f2, select = -GCF)
+rf_stool[rf_stool>0] <- 1
+rf_Supragingival_plaque <- subset(df_bgc_nor_supragingival_plaque_f2, select = -GCF)
+rf_Supragingival_plaque[rf_Supragingival_plaque>0] <- 1
+rf_Buccal_mucosa <- subset(df_bgc_nor_buccal_mucosa_f2, select = -GCF)
+rf_Buccal_mucosa[rf_Buccal_mucosa>0] <- 1
+rf_Tongue_dorsum <- subset(df_bgc_nor_tongue_dorsum_f2, select = -GCF)
+rf_Tongue_dorsum[rf_Tongue_dorsum>0] <- 1
+rf_Anterior_nares <- subset(df_bgc_nor_Anterior_nares_f2, select = -GCF)
+rf_Anterior_nares[rf_Anterior_nares>0] <- 1
+
+in_list <- list(rf_Anterior_nares, rf_stool, rf_Posterior_fornix,  rf_Supragingival_plaque, rf_Buccal_mucosa, rf_Tongue_dorsum)
+for (i in in_list) { print(nrow(i))}
+
+df <- lapply(in_list,function(i)specaccum(t(i), method="random"))
+
+pdf(file = "figure_4B_GCF_refraction_curve.pdf",height = 5, width = 5)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+plot(df[[1]], 
+     ylim = c(0,350),
+     xlim = c(0,281),
+     xlab = "Sample Size",
+     ylab = "Number of GCF",
+     lwd = 2,
+     ci = 0,
+     col = my_col[1])
+for (i in 2:6){
+  plot(df[[i]], add=T, col=my_col[i], ci=0, lwd =2)
+} 
+legend('topleft', c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum"),
+       col=my_col, lty=1, lwd = 3,
+       bty='n', inset=0.001)
+dev.off()
+
+
+#######################################################
+# 5. common GCFs in different body sites
+#######################################################
+# 1. common GCFs in six body sites
+v_common <- v_all[rowSums(v_all[,2:7])==6,]$gcf
+
+df_common <- df_abundance_merge[v_common, ]
+df_common_t <- t(df_common) %>% as.data.frame()
+
+annotation_row_common <- sample_meta
+rownames(annotation_row_common) <- annotation_row_common$sample
+annotation_row_common <- subset(annotation_row_common, select = -sample)
+identical(rownames(annotation_row_common),rownames(df_common_t))
+
+df_gcf_annotation_common <- df_gcf_annotation_final[names(df_common_t),c("representative_class", "classII_bacteriocins")]
+identical(rownames(df_gcf_annotation_common), names(df_common_t))
+annotation_col_common <- data.frame(BGC_Class = df_gcf_annotation_common$representative_class)
+rownames(annotation_col_common) <- rownames(df_gcf_annotation_common)
+identical(rownames(annotation_col_common), names(df_common_t))
+
+pdf(file = "figures_4C_Common_GCFs_in_six_body_sites.pdf",,height = 18, width = 12)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+pheatmap(as.matrix(log10(df_common_t+0.00001)), 
+         cellwidth = 60,
+         cellheight = 1,
+         cluster_row = FALSE,
+         annotation_col = annotation_col_common,
+         annotation_row = annotation_row_common,
+         #annotation_colors = ann_colors,
+         show_colnames = TRUE,
+         show_rownames = FALSE,
+         #border_color = "grey",
+         gaps_row = c(66, 166, 335, 616, 682)
+         )
+dev.off()
+
+f_pre_abu <- function(d_f, site){
+  df_tmp <- d_f[,2:ncol(d_f)]
+  df_tmp <- as.data.frame(sapply(df_tmp, as.numeric))
+  prevalence <- rowSums(df_tmp>0)/ncol(d_f)*100
+  median_abundance <- apply(df_tmp, 1, median)
+  df_site <- data.frame(genus = d_f[,1],
+                        prevalence = prevalence,
+                        abundance = median_abundance,
+                        body_site = site,
+                        stringsAsFactors = FALSE)
+  df_site <- df_site[df_site$prevalence != 0, ]
+  return(df_site)
+}
+
+df_common_Anterior_nares <- df_bgc_nor_Anterior_nares_f2[df_bgc_nor_Anterior_nares_f2$GCF %in% v_common, ]
+df_common_gut <- df_bgc_nor_stool_f2[df_bgc_nor_stool_f2$GCF %in% v_common, ]
+df_common_vaginal <- df_bgc_nor_posterior_fornix_f2[df_bgc_nor_posterior_fornix_f2$GCF %in% v_common, ]   
+df_common_oral <- df_bgc_nor_supragingival_plaque_f2[df_bgc_nor_supragingival_plaque_f2$GCF %in% v_common, ]
+df_common_Buccal_mucosa <- df_bgc_nor_buccal_mucosa_f2[df_bgc_nor_buccal_mucosa_f2$GCF %in% v_common, ]
+df_common_Tongue_dorsum <- df_bgc_nor_tongue_dorsum_f2[df_bgc_nor_tongue_dorsum_f2$GCF %in% v_common, ]
+
+df_common_Anterior_nares_abu_pre <- f_pre_abu(df_common_Anterior_nares, "Anterior_nares")
+df_common_gut_abu_pre <- f_pre_abu(df_common_gut, "Stool")
+df_common_vaginal_abu_pre <- f_pre_abu(df_common_vaginal, "Posterior_fornix")
+df_common_oral_abu_pre <- f_pre_abu(df_common_oral, "Supragingival_plaque")
+df_common_Buccal_mucosa_abu_pre <- f_pre_abu(df_common_Buccal_mucosa, "Buccal_mucosa")
+df_common_Tongue_dorsum_abu_pre <- f_pre_abu(df_common_Tongue_dorsum, "Tongue_dorsum")
+
+df_commom_pre_abu_all <- rbind(df_common_Anterior_nares_abu_pre,
+                               df_common_gut_abu_pre,
+                               df_common_vaginal_abu_pre,
+                               df_common_oral_abu_pre,
+                               df_common_Buccal_mucosa_abu_pre,
+                               df_common_Tongue_dorsum_abu_pre)
+df_commom_pre_abu_all$body_site <- factor(df_commom_pre_abu_all$body_site, levels = rev(c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa", "Tongue_dorsum")))
+
+p_common <- ggplot(df_commom_pre_abu_all, aes(body_site,genus))+
+            geom_point(aes(size=prevalence, color=abundance))+
+            scale_colour_gradient2(low="#008000",mid="#cc9900",high="#ff0000", midpoint=max(df_commom_pre_abu_all$abundance)/2)+
+            coord_flip()+
+            theme_bw()+
+            xlab("")+
+            ylab("")+
+            theme(axis.text = element_text(color = "black", size = 12),
+                  axis.text.x = element_text(angle = 90, hjust = 1, vjust = 1))
+
+ggsave(filename = "figure_4C_6_common_GCFs_prevalence_abundance_differet_body_sites.pdf",plot = p_common, useDingbats = FALSE, width = 5, height = 4)
+
+
+#######################################################
+# 6. Variation of GCF numbers in different body sites
+#######################################################
+df_gcf_no_Anterior_nares <- colSums(df_bgc_nor_Anterior_nares_f2[,2:ncol(df_bgc_nor_Anterior_nares_f2)]>0)
+df_gcf_no_gut <- colSums(df_bgc_nor_stool_f2[,2:ncol(df_bgc_nor_stool_f2)]>0)
+df_gcf_no_vaginal <- colSums(df_bgc_nor_posterior_fornix_f2[,2:ncol(df_bgc_nor_posterior_fornix_f2)]>0)
+df_gcf_no_oral <- colSums(df_bgc_nor_supragingival_plaque_f2[,2:ncol(df_bgc_nor_supragingival_plaque_f2)]>0)
+df_gcf_no_Buccal_mucosa <- colSums(df_bgc_nor_buccal_mucosa_f2[,2:ncol(df_bgc_nor_buccal_mucosa_f2)]>0)
+df_gcf_no_Tongue_dorsum <- colSums(df_bgc_nor_tongue_dorsum_f2[,2:ncol(df_bgc_nor_tongue_dorsum_f2)]>0)
+
+df_no_average_sd <- data.frame(site=c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum"),
+                               mean=c(mean(df_gcf_no_Anterior_nares),mean(df_gcf_no_gut), mean(df_gcf_no_vaginal),
+                                      mean(df_gcf_no_oral),mean(df_gcf_no_Buccal_mucosa),mean(df_gcf_no_Tongue_dorsum)),
+                               sd=c(sd(df_gcf_no_Anterior_nares),sd(df_gcf_no_gut),sd(df_gcf_no_vaginal),
+                                    sd(df_gcf_no_oral),sd(df_gcf_no_Buccal_mucosa),sd(df_gcf_no_Tongue_dorsum)))
+df_no_average_sd$site <- factor(df_no_average_sd$site, rev(c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum")))
+p_no <- ggplot(df_no_average_sd, aes(x=site, y=mean, fill=site)) + 
+        geom_bar(stat="identity",color="black",position=position_dodge()) +
+        geom_errorbar(aes(ymin=mean, ymax=mean+sd), width=.2,
+                     position=position_dodge(.9))+
+        scale_fill_manual(values = rev(my_col))+
+        theme_bw()+
+        coord_flip()+
+        ylab("Number of GCFs")+
+        xlab("")+
+        theme(legend.position = "none")
+ggsave(filename = "figure_4C_GCF_number_differet_body_sites.pdf",plot = p_no, useDingbats = FALSE, width = 4, height = 4)
+```
+
+
+# LAB genus abundance
+```{r}
+lab_genus <- read.xlsx("../../LAB_Genera.xlsx", sheet = 2)
+
+df_genus_vaginal_lab <- df_genus_posterior_fornix %>% filter(clade_name %in% lab_genus$GTDB_taxonomy)
+df_genus_gut_lab <- df_genus_stool %>% filter(clade_name %in% lab_genus$GTDB_taxonomy) 
+df_genus_oral_lab <- df_genus_supragingival_plaque %>% filter(clade_name %in% lab_genus$GTDB_taxonomy)
+df_genus_Buccal_mucosa_lab <- df_genus_buccal_mucosa %>% filter(clade_name %in% lab_genus$GTDB_taxonomy)
+df_genus_Anterior_nares_lab <- df_genus_Anterior_nares %>% filter(clade_name %in% lab_genus$GTDB_taxonomy)
+df_genus_Tongue_dorsum_lab <- df_genus_tongue_dorsum %>% filter(clade_name %in% lab_genus$GTDB_taxonomy)
+
+df_genus_vaginal_lab_fecth <- df_genus_vaginal_lab[, c("clade_name", sample_meta[sample_meta$sites=="Posterior_fornix",]$sample)]
+df_genus_gut_lab_fecth <- df_genus_gut_lab[, c("clade_name", sample_meta[sample_meta$sites=="Stool",]$sample)]
+df_genus_oral_lab_fecth <- df_genus_oral_lab[, c("clade_name", sample_meta[sample_meta$sites=="Supragingival_plaque",]$sample)]
+df_genus_Buccal_mucosa_lab_fecth <- df_genus_Buccal_mucosa_lab[, c("clade_name", sample_meta[sample_meta$sites=="Buccal_mucosa",]$sample)]
+df_genus_Anterior_nares_lab_fecth <- df_genus_Anterior_nares_lab[, c("clade_name", sample_meta[sample_meta$sites=="Anterior_nares",]$sample)]
+df_genus_Tongue_dorsum_lab_fecth <- df_genus_Tongue_dorsum_lab[, c("clade_name", sample_meta[sample_meta$sites=="Tongue_dorsum",]$sample)]
+
+df_Posterior_fornix <- f_pre_abu(df_genus_vaginal_lab_fecth, "Posterior_fornix")
+df_Stool <- f_pre_abu(df_genus_gut_lab_fecth, "Stool")
+df_Supragingival_plaque <- f_pre_abu(df_genus_oral_lab_fecth, "Supragingival_plaque")
+df_Buccal_mucosa <- f_pre_abu(df_genus_Buccal_mucosa_lab_fecth, "Buccal_mucosa")
+df_Anterior_nares <- f_pre_abu(df_genus_Anterior_nares_lab_fecth, "Anterior_nares")
+df_Tongue_dorsum <- f_pre_abu(df_genus_Tongue_dorsum_lab_fecth, "Tongue_dorsum")
+
+df_pre_abu_all <- rbind(df_Posterior_fornix, df_Stool, df_Supragingival_plaque, df_Buccal_mucosa, df_Anterior_nares, df_Tongue_dorsum)
+df_pre_abu_all$body_site <- factor(df_pre_abu_all$body_site, levels = rev(c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa", "Tongue_dorsum")))
+
+p_genus <- ggplot(df_pre_abu_all, aes(body_site,genus))+
+            geom_point(aes(size=prevalence, color=abundance))+
+            scale_colour_gradient2(low="#008000",mid="#cc9900",high="#ff0000", midpoint=50)+
+            coord_flip()+
+            theme_bw()+
+            xlab("")+
+            ylab("")+
+            theme(axis.text = element_text(color = "black", size = 12),
+                  axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+ggsave(filename = "figure_4A_genus_prevalence_abundance_differet_body_sites.pdf",plot = p_genus, useDingbats = FALSE, width = 5, height = 4)
+```
+
+
+
+# LAB species abundance
+```{r}
+lab_genus <- read.xlsx("../../LAB_Genera.xlsx", sheet = 2)
+
+df_species_Anterior_nares$species <- rownames(df_species_Anterior_nares)
+df_species_supragingival_plaque$species <- rownames(df_species_supragingival_plaque)
+df_species_buccal_mucosa$species <- rownames(df_species_buccal_mucosa)
+df_species_tongue_dorsum$species <- rownames(df_species_tongue_dorsum)
+df_species_posterior_fornix$species <- rownames(df_species_posterior_fornix)
+df_species_stool$species <- rownames(df_species_stool)
+
+df_species_Anterior_nares$species <- gsub("s__|_.+","",df_species_Anterior_nares$species)
+df_species_supragingival_plaque$species <- gsub("s__|_.+","",df_species_supragingival_plaque$species)
+df_species_buccal_mucosa$species <- gsub("s__|_.+","",df_species_buccal_mucosa$species)
+df_species_tongue_dorsum$species <- gsub("s__|_.+","",df_species_tongue_dorsum$species)
+df_species_posterior_fornix$species <- gsub("s__|_.+","",df_species_posterior_fornix$species)
+df_species_stool$species <- gsub("s__|_.+","",df_species_stool$species)
+
+df_species_Anterior_nares$species <- paste("g__",df_species_Anterior_nares$species,sep = "")
+df_species_supragingival_plaque$species <- paste("g__",df_species_supragingival_plaque$species,sep = "")
+df_species_buccal_mucosa$species <- paste("g__",df_species_buccal_mucosa$species,sep = "")
+df_species_tongue_dorsum$species <- paste("g__",df_species_tongue_dorsum$species,sep = "")
+df_species_posterior_fornix$species <- paste("g__",df_species_posterior_fornix$species,sep = "")
+df_species_stool$species <- paste("g__",df_species_stool$species,sep = "")
+
+df_species_Anterior_nares_lab <- df_species_Anterior_nares %>% filter(species %in% lab_genus$GTDB_taxonomy)
+df_species_supragingival_plaque_lab <- df_species_supragingival_plaque %>% filter(species %in% lab_genus$GTDB_taxonomy)
+df_species_buccal_mucosa_lab <- df_species_buccal_mucosa %>% filter(species %in% lab_genus$GTDB_taxonomy)
+df_species_tongue_dorsum_lab <- df_species_tongue_dorsum %>% filter(species %in% lab_genus$GTDB_taxonomy)
+df_species_posterior_fornix_lab <- df_species_posterior_fornix %>% filter(species %in% lab_genus$GTDB_taxonomy)
+df_species_stool_lab <- df_species_stool %>% filter(species %in% lab_genus$GTDB_taxonomy)
+
+df_species_Anterior_nares_lab <- subset(df_species_Anterior_nares_lab, select = -species)
+df_species_supragingival_plaque_lab <- subset(df_species_supragingival_plaque_lab, select = -species)
+df_species_buccal_mucosa_lab <- subset(df_species_buccal_mucosa_lab, select = -species)
+df_species_tongue_dorsum_lab <- subset(df_species_tongue_dorsum_lab, select = -species)
+df_species_posterior_fornix_lab <- subset(df_species_posterior_fornix_lab, select = -species)
+df_species_stool_lab <- subset(df_species_stool_lab, select = -species)
+
+df_species_posterior_fornix_lab_fecth <- df_species_posterior_fornix_lab[, sample_meta[sample_meta$sites=="Posterior_fornix",]$sample]
+df_species_stool_lab_fecth <- df_species_stool_lab[, sample_meta[sample_meta$sites=="Stool",]$sample]
+df_species_supragingival_plaque_lab_fecth <- df_species_supragingival_plaque_lab[, sample_meta[sample_meta$sites=="Supragingival_plaque",]$sample]
+df_species_buccal_mucosa_lab_fecth <- df_species_buccal_mucosa_lab[, sample_meta[sample_meta$sites=="Buccal_mucosa",]$sample]
+df_species_Anterior_nares_lab_fecth <- df_species_Anterior_nares_lab[, sample_meta[sample_meta$sites=="Anterior_nares",]$sample]
+df_species_tongue_dorsum_lab_fecth <- df_species_tongue_dorsum_lab[, sample_meta[sample_meta$sites=="Tongue_dorsum",]$sample]
+
+df_species_posterior_fornix_lab_fecth$species <- rownames(df_species_posterior_fornix_lab_fecth)
+df_species_stool_lab_fecth$species <- rownames(df_species_stool_lab_fecth)
+df_species_supragingival_plaque_lab_fecth$species <- rownames(df_species_supragingival_plaque_lab_fecth)
+df_species_buccal_mucosa_lab_fecth$species <- rownames(df_species_buccal_mucosa_lab_fecth)
+df_species_Anterior_nares_lab_fecth$species <- rownames(df_species_Anterior_nares_lab_fecth)
+df_species_tongue_dorsum_lab_fecth$species <- rownames(df_species_tongue_dorsum_lab_fecth)
+
+df_species_merge <- Reduce(function(x,y) merge(x = x, y = y, by = "species", all=TRUE), 
+                    list(df_species_Anterior_nares_lab_fecth,
+                         df_species_supragingival_plaque_lab_fecth,
+                         df_species_buccal_mucosa_lab_fecth, 
+                         df_species_tongue_dorsum_lab_fecth,
+                         df_species_posterior_fornix_lab_fecth,
+                         df_species_stool_lab_fecth))
+df_species_merge[is.na(df_species_merge)] <- 0
+rownames(df_species_merge) <- df_species_merge$species
+df_species_merge <- subset(df_species_merge, select=-species)
+df_species_merge_n <- mutate_all(df_species_merge, function(x){as.numeric(as.character(x))})
+df_species_merge_n <- df_species_merge_n[, sample_meta$sample]
+df_species_merge_n <- df_species_merge_n[rowSums(df_species_merge_n)>0,]
+identical(names(df_species_merge_n), sample_meta$sample)
+df_species_merge_n <- df_species_merge_n[,colSums(df_species_merge_n)>0]
+
+# PcoA
+distance <- vegdist(t(df_species_merge_n), method = 'bray')
+pcoa <- cmdscale(distance, k = (ncol(df_species_merge_n) - 1), eig = TRUE)
+point <- data.frame(pcoa$point)
+pcoa_eig <- (pcoa$eig)[1:2] / sum(pcoa$eig)
+# extract first two coordinate value
+sample_site <- data.frame({pcoa$point})[1:2]
+sample_site$sample <- rownames(sample_site)
+names(sample_site)[1:2] <- c('PCoA1', 'PCoA2')
+group_m <- merge(sample_site, sample_meta, by = "sample", all.x = TRUE)
+group_m$sites <- factor(group_m$sites, levels = c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum"))
+
+plot <- ggscatter(group_m, x= "PCoA1", y = "PCoA2",color="sites",
+              #ellipse = TRUE,  # 设置是否需要confidence ellipses
+              #mean.point = TRUE, star.plot = TRUE,   # 设置confidence ellipses中心是否与所有点连线
+              #ellipse.level = 0.95,  # 设置confidence level可以调整椭圆的大小
+              ggtheme = theme_bw()) +
+              labs(x = paste('PCoA1: ', round(100 * pcoa_eig[1], 2), '%'),
+                      y = paste('PCoA2: ', round(100 * pcoa_eig[2], 2), '%'))+
+              theme_classic()+#去掉背景框
+              scale_color_manual(values = my_col)+
+              geom_vline(xintercept = 0, color = 'gray', size = 0.4) + 
+              geom_hline(yintercept = 0, color = 'gray', size = 0.4) +
+              #geom_point(size = 4)+  #可在这里修改点的透明度、大小
+              theme(panel.grid = element_line(color = 'black', linetype = 2, size = 0.1), 
+              panel.background = element_rect(color = 'black', fill = 'transparent'), 
+              legend.title=element_blank())+
+               theme(axis.title = element_text(size = 18, colour="black"),
+              axis.text = element_text(size = 16, colour = "black"),
+              legend.text = element_text(size = 16))
+plot
+ggsave(filename = "figures_PcoA_clustering_LAB_species_in_different_body_sites.pdf", plot, useDingbats = FALSE, width = 8,height = 5)
+
+```
+
+
+
+# Abundance of Class II bacteriocin precursors
+```{r}
+df_precursors <- read.delim("../../13.ClassII_bacteriocin_precursors/01.cdhit_clustering/All_187649_classII_precursors_info.tsv")
+df_nor_Anterior_nares_pre <- df_bgc_nor_Anterior_nares %>% filter(Geneid %in% df_precursors$Raw)
+df_nor_supragingival_plaque_pre <- df_bgc_nor_supragingival_plaque %>% filter(Geneid %in% df_precursors$Raw)
+df_nor_buccal_mucosa_pre <- df_bgc_nor_buccal_mucosa %>% filter(Geneid %in% df_precursors$Raw)
+df_nor_tongue_dorsum_pre <- df_bgc_nor_tongue_dorsum %>% filter(Geneid %in% df_precursors$Raw)
+df_nor_posterior_fornix_pre <- df_bgc_nor_posterior_fornix %>% filter(Geneid %in% df_precursors$Raw)
+df_nor_stool_pre <- df_bgc_nor_stool %>% filter(Geneid %in% df_precursors$Raw)
+
+df_nor_Anterior_nares_pre <- subset(df_nor_Anterior_nares_pre, select = -GCF)
+df_nor_supragingival_plaque_pre <- subset(df_nor_supragingival_plaque_pre, select = -GCF)
+df_nor_buccal_mucosa_pre <- subset(df_nor_buccal_mucosa_pre, select = -GCF)
+df_nor_tongue_dorsum_pre <- subset(df_nor_tongue_dorsum_pre, select = -GCF)
+df_nor_posterior_fornix_pre <- subset(df_nor_posterior_fornix_pre, select = -GCF)
+df_nor_stool_pre <- subset(df_nor_stool_pre, select = -GCF)
+
+df_nor_Anterior_nares_pre_f <- df_nor_Anterior_nares_pre[rowSums(df_nor_Anterior_nares_pre[,1:ncol(df_nor_Anterior_nares_pre)-1])>0,]
+df_nor_supragingival_plaque_pre_f <- df_nor_supragingival_plaque_pre[rowSums(df_nor_supragingival_plaque_pre[,1:ncol(df_nor_supragingival_plaque_pre)-1])>0,]
+df_nor_buccal_mucosa_pre_f <- df_nor_buccal_mucosa_pre[rowSums(df_nor_buccal_mucosa_pre[,1:ncol(df_nor_buccal_mucosa_pre)-1])>0,]
+df_nor_tongue_dorsum_pre_f <- df_nor_tongue_dorsum_pre[rowSums(df_nor_tongue_dorsum_pre[,1:ncol(df_nor_tongue_dorsum_pre)-1])>0,]
+df_nor_posterior_fornix_pre_f <- df_nor_posterior_fornix_pre[rowSums(df_nor_posterior_fornix_pre[,1:ncol(df_nor_posterior_fornix_pre)-1])>0,]
+df_nor_stool_pre_f <- df_nor_stool_pre[rowSums(df_nor_stool_pre[,1:ncol(df_nor_stool_pre)-1])>0,]
+
+# aggregate abundance of each precursors into precursor clusters
+df_nor_Anterior_nares_pre_f2 <- merge(df_nor_Anterior_nares_pre_f, df_precursors[,c("Raw","Cluster_re")], by.x = "Geneid", by.y = "Raw", all.x = TRUE)
+df_nor_supragingival_plaque_pre_f2 <- merge(df_nor_supragingival_plaque_pre_f, df_precursors[,c("Raw","Cluster_re")], by.x = "Geneid", by.y = "Raw", all.x = TRUE)
+df_nor_buccal_mucosa_pre_f2 <- merge(df_nor_buccal_mucosa_pre_f, df_precursors[,c("Raw","Cluster_re")], by.x = "Geneid", by.y = "Raw", all.x = TRUE)
+df_nor_tongue_dorsum_pre_f2 <- merge(df_nor_tongue_dorsum_pre_f, df_precursors[,c("Raw","Cluster_re")], by.x = "Geneid", by.y = "Raw", all.x = TRUE)
+df_nor_posterior_fornix_pre_f2 <- merge(df_nor_posterior_fornix_pre_f, df_precursors[,c("Raw","Cluster_re")], by.x = "Geneid", by.y = "Raw", all.x = TRUE)
+df_nor_stool_pre_f2 <- merge(df_nor_stool_pre_f, df_precursors[,c("Raw","Cluster_re")], by.x = "Geneid", by.y = "Raw", all.x = TRUE)
+
+df_nor_Anterior_nares_pre_f2 <- subset(df_nor_Anterior_nares_pre_f2, select = -Geneid)
+df_nor_supragingival_plaque_pre_f2 <- subset(df_nor_supragingival_plaque_pre_f2, select = -Geneid)
+df_nor_buccal_mucosa_pre_f2 <- subset(df_nor_buccal_mucosa_pre_f2, select = -Geneid)
+df_nor_tongue_dorsum_pre_f2 <- subset(df_nor_tongue_dorsum_pre_f2, select = -Geneid)
+df_nor_posterior_fornix_pre_f2 <- subset(df_nor_posterior_fornix_pre_f2, select = -Geneid)
+df_nor_stool_pre_f2 <- subset(df_nor_stool_pre_f2, select = -Geneid)
+
+df_nor_Anterior_nares_pre_f3 <- aggregate(. ~ Cluster_re, data = df_nor_Anterior_nares_pre_f2, sum)
+df_nor_supragingival_plaque_pre_f3 <- aggregate(. ~ Cluster_re, data = df_nor_supragingival_plaque_pre_f2, sum)
+df_nor_buccal_mucosa_pre_f3 <- aggregate(. ~ Cluster_re, data = df_nor_buccal_mucosa_pre_f2, sum)
+df_nor_tongue_dorsum_pre_f3 <- aggregate(. ~ Cluster_re, data = df_nor_tongue_dorsum_pre_f2, sum)
+df_nor_posterior_fornix_pre_f3 <- aggregate(. ~ Cluster_re, data = df_nor_posterior_fornix_pre_f2, sum)
+df_nor_stool_pre_f3 <- aggregate(. ~ Cluster_re, data = df_nor_stool_pre_f2, sum)
+
+df_nor_Anterior_nares_pre_f3 <- df_nor_Anterior_nares_pre_f3[,c("Cluster_re", names(df_bgc_nor_Anterior_nares_f2)[2:ncol(df_bgc_nor_Anterior_nares_f2)])]
+df_nor_supragingival_plaque_pre_f3 <- df_nor_supragingival_plaque_pre_f3[,c("Cluster_re", names(df_bgc_nor_supragingival_plaque_f2)[2:ncol(df_bgc_nor_supragingival_plaque_f2)])]
+df_nor_buccal_mucosa_pre_f3 <- df_nor_buccal_mucosa_pre_f3[,c("Cluster_re", names(df_bgc_nor_buccal_mucosa_f2)[2:ncol(df_bgc_nor_buccal_mucosa_f2)])]
+df_nor_tongue_dorsum_pre_f3 <- df_nor_tongue_dorsum_pre_f3[,c("Cluster_re", names(df_bgc_nor_tongue_dorsum_f2)[2:ncol(df_bgc_nor_tongue_dorsum_f2)])]
+df_nor_posterior_fornix_pre_f3 <- df_nor_posterior_fornix_pre_f3[,c("Cluster_re", names(df_bgc_nor_posterior_fornix_f2)[2:ncol(df_bgc_nor_posterior_fornix_f2)])]
+df_nor_stool_pre_f3 <- df_nor_stool_pre_f3[,c("Cluster_re", names(df_bgc_nor_stool_f2)[2:ncol(df_bgc_nor_stool_f2)])]
+
+
+#######################################################
+# 1. Ave. abundance vs. prevalence
+#######################################################
+f_pre_abu_mean <- function(d_f, site){
+  df_tmp <- d_f[,2:ncol(d_f)]
+  df_tmp <- as.data.frame(sapply(df_tmp, as.numeric))
+  prevalence <- rowSums(df_tmp>0)/ncol(d_f)*100
+  mean_abundance <- apply(df_tmp, 1, mean)
+  df_site <- data.frame(genus = d_f[,1],
+                        prevalence = prevalence,
+                        abundance = mean_abundance,
+                        body_site = site,
+                        stringsAsFactors = FALSE)
+  df_site <- df_site[df_site$prevalence != 0, ]
+  return(df_site)
+}
+
+df_Anterior_nares_pre_overall <- f_pre_abu_mean(df_nor_Anterior_nares_pre_f3,"Anterior_nares")
+df_supragingival_plaque_pre_overall <- f_pre_abu_mean(df_nor_supragingival_plaque_pre_f3,"Supragingival_plaque")
+df_buccal_mucosa_pre_overall <- f_pre_abu_mean(df_nor_buccal_mucosa_pre_f3,"Buccal_mucosa")
+df_tongue_dorsum_pre_overall <- f_pre_abu_mean(df_nor_tongue_dorsum_pre_f3,"Tongue_dorsum")
+df_posterior_fornix_pre_overall <- f_pre_abu_mean(df_nor_posterior_fornix_pre_f3,"Posterior_fornix")
+df_stool_pre_overall <- f_pre_abu_mean(df_nor_stool_pre_f3,"Stool")
+
+df_pre_overall <- rbind(df_Anterior_nares_pre_overall, df_supragingival_plaque_pre_overall, df_buccal_mucosa_pre_overall, 
+                        df_tongue_dorsum_pre_overall, df_posterior_fornix_pre_overall, df_stool_pre_overall)
+df_pre_overall$logAbu <- log2(df_pre_overall$abundance)
+df_pre_overall$body_site <- factor(df_pre_overall$body_site , levels = c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum"))
+df_known_homo <- read.xlsx("../../13.ClassII_bacteriocin_precursors/01.cdhit_clustering/network_with_known.xlsx", sheet = 2)
+df_pre_overall$knwon <- ifelse(df_pre_overall$genus %in% df_known_homo$Cluster_re, "known", "unknown")
+
+p_abu_overall <- ggplot(df_pre_overall, aes(x=logAbu, y=prevalence))+
+                #ggplot(df_pre_overall, aes(x=logAbu, y=prevalence, color=knwon))+
+                    geom_point(size=1)+
+                    scale_color_manual(values = c("red", "grey"))+
+                    facet_wrap(vars(body_site), nrow = 2)+
+                    theme_bw()+
+                    xlab("Average abundance (log2-transformed)")+
+                    ylab("Prevalence")+
+                    geom_vline(xintercept = -5, colour="red", linetype = "dashed")
+ggsave(filename = "figures_abundance_vs_prevalence_classII_bacteriocins_in_different_body_sites.pdf", p_abu_overall, useDingbats = FALSE, width = 7.5,height = 4)
+
+
+#######################################################
+# 2. Overall abundance
+#######################################################
+sample_meta_pre <- data.frame(sample=c(names(df_nor_Anterior_nares_pre_f3)[2:ncol(df_nor_Anterior_nares_pre_f3)],
+                                   names(df_nor_supragingival_plaque_pre_f3)[2:ncol(df_nor_supragingival_plaque_pre_f3)],
+                                   names(df_nor_buccal_mucosa_pre_f3)[2:ncol(df_nor_buccal_mucosa_pre_f3)],
+                                   names(df_nor_tongue_dorsum_pre_f3)[2:ncol(df_nor_tongue_dorsum_pre_f3)],
+                                   names(df_nor_posterior_fornix_pre_f3)[2:ncol(df_nor_posterior_fornix_pre_f3)],
+                                   names(df_nor_stool_pre_f3)[2:ncol(df_nor_stool_pre_f3)]),
+                          sites=c(rep("Anterior_nares", ncol(df_nor_Anterior_nares_pre_f3)-1),
+                                  rep("Supragingival_plaque", ncol(df_nor_supragingival_plaque_pre_f3)-1),
+                                  rep("Buccal_mucosa", ncol(df_nor_buccal_mucosa_pre_f3)-1),
+                                  rep("Tongue_dorsum", ncol(df_nor_tongue_dorsum_pre_f3)-1),
+                                  rep("Posterior_fornix", ncol(df_nor_posterior_fornix_pre_f3)-1),
+                                  rep("Stool", ncol(df_nor_stool_pre_f3)-1)))
+df_abundance_merge_pre <- Reduce(function(x,y) merge(x = x, y = y, by = "Cluster_re", all=TRUE), 
+                    list(df_nor_Anterior_nares_pre_f3,
+                         df_nor_supragingival_plaque_pre_f3,
+                         df_nor_buccal_mucosa_pre_f3, 
+                         df_nor_tongue_dorsum_pre_f3,
+                         df_nor_posterior_fornix_pre_f3,
+                         df_nor_stool_pre_f3))
+df_abundance_merge_pre[is.na(df_abundance_merge_pre)] <- 0
+rownames(df_abundance_merge_pre) <- df_abundance_merge_pre$Cluster_re
+df_abundance_merge_pre <- subset(df_abundance_merge_pre, select=-Cluster_re)
+df_abundance_merge_pre <- df_abundance_merge_pre[, sample_meta$sample]
+df_abundance_merge_pre <- df_abundance_merge_pre[rowSums(df_abundance_merge_pre)>0,]
+identical(names(df_abundance_merge_pre), sample_meta$sample)
+
+annotation_col <- data.frame(body_site = sample_meta$sites)
+rownames(annotation_col) <- sample_meta$sample
+
+p_abundance_pre <- pheatmap(as.matrix(log10(df_abundance_merge_pre+0.00001)),
+                 cellwidth = 1,
+                 cellheight = 1,
+                 cluster_cols = FALSE,
+                 cluster_rows = TRUE,
+                 annotation_col = annotation_col,
+                 #annotation_colors = ann_colors,
+                 show_colnames = FALSE,
+                 show_rownames = FALSE,
+                 #border_color = "grey",
+                 gaps_col = c(66, 347, 413, 479, 648))
+
+pdf(file = "figures_644_classII_bacteriocins_clusters_in_six_body_sites.pdf",,height = 18, width = 12)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+p_abundance_pre
+dev.off()
+
+
+#######################################################
+# 2. tSNE
+#######################################################
+df_abundance_merge_pre_f <- df_abundance_merge_pre[,colSums(df_abundance_merge_pre)>0]
+set.seed(123)
+perplexity <- floor((nrow(df_abundance_merge_pre_f) -1) / 3)
+if (perplexity>0){
+  if (perplexity>30){
+    perplexity <- 30
+  }}
+tsne_out <- Rtsne(t(df_abundance_merge_pre_f), perplexity=perplexity, check_duplicates = FALSE)
+data <- data.frame(tsne_out$Y, colnames(df_abundance_merge_pre_f))
+names(data) <- c("tSNE1", "tSNE2", "sample")
+
+data_m <- merge(data, sample_meta_pre, by = "sample", all.x = TRUE)
+data_m$sample <- factor(data_m$sample, levels = c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum"))
+
+p_tsne <- ggplot(data_m, aes(x = tSNE1, y = tSNE2, colour = sites)) + 
+                    geom_point(alpha = 1) +
+                    theme_base() +
+                    scale_color_manual(values = my_col)+
+                    #scale_color_d3(palette="category20") +
+                    theme(axis.text = element_text(size = 14, colour = "black"),
+                            axis.title = element_text(size = 16, colour = "black"),
+                            plot.title = element_text(hjust = 0.5),
+                            panel.border = element_blank())
+ggsave(filename = "figures_tsne_clustering_classII_bacteriocins_in_different_body_sites.pdf", p_tsne, useDingbats = FALSE, width = 7.5,height = 5)
+
+# pairwise ANOSIM for raw data
+df_R_pvalue <- data.frame(group_1 = "str",
+                          group_2 = "str",
+                          Globe_R = 0.1,
+                          p_value = 0.1)
+df_abundance_merge_pre_f_t <- df_abundance_merge_pre_f %>% t() %>% as.data.frame()
+
+for (i in 1:5){
+  for (j in (i+1):6){
+    select_site <- unique(sample_meta_pre$sites)[c(i, j)]
+    subset_data <- df_abundance_merge_pre_f_t[intersect(rownames(df_abundance_merge_pre_f_t), sample_meta_pre[sample_meta_pre$sites %in% select_site, ]$sample),]
+    subset_group <- sample_meta_pre[sample_meta_pre$sample %in% rownames(subset_data), ]
+    index <- factor(subset_group$sites, levels = rownames(subset_data))
+    subset_group <- subset_group[order(index),]
+    subset_dist <- vegdist(as.matrix(subset_data), method = "euclidean")
+    anosim_result <- anosim(subset_dist, subset_group$sites, permutations = 999)
+    summary(anosim_result)
+    #plot(anosim_result)
+    df_R_pvalue <- rbind(df_R_pvalue, c(unique(sample_meta_pre$sites)[i],unique(sample_meta_pre$sites)[j],anosim_result$statistic,anosim_result$signif))
+  }
+}
+df_R_pvalue <- df_R_pvalue[-1,]
+df_R_pvalue
+write.csv(df_R_pvalue, "pariwise_ANOSIM_test_different_body_sites_in_classII_bacteriocins.csv")
+
+
+#######################################################
+# 3. Venn plot for detected families
+#######################################################
+# upset plot
+v_Posterior_fornix_pre <- data.frame(gcf=df_nor_posterior_fornix_pre_f3$Cluster_re, Posterior_fornix=1, stringsAsFactors = FALSE)
+v_Stool_pre <- data.frame(gcf=df_nor_stool_pre_f3$Cluster_re, Stool=1, stringsAsFactors = FALSE)
+v_Supragingival_plaque_pre <- data.frame(gcf=df_nor_supragingival_plaque_pre_f3$Cluster_re, Supragingival_plaque=1, stringsAsFactors = FALSE)
+v_Buccal_mucosa_pre <- data.frame(gcf=df_nor_buccal_mucosa_pre_f3$Cluster_re, Buccal_mucosa=1, stringsAsFactors = FALSE)
+v_Tongue_dorsum_pre <- data.frame(gcf=df_nor_tongue_dorsum_pre_f3$Cluster_re, Tongue_dorsum=1, stringsAsFactors = FALSE)
+v_Anterior_nares_pre <- data.frame(gcf=df_nor_Anterior_nares_pre_f3$Cluster_re, Anterior_nares=1, stringsAsFactors = FALSE)
+
+v_all_pre <- Reduce(function(x,y) merge(x = x, y = y, by = "gcf", all=TRUE), 
+                  list(v_Posterior_fornix_pre, v_Stool_pre, v_Supragingival_plaque_pre, v_Buccal_mucosa_pre, v_Tongue_dorsum_pre, v_Anterior_nares_pre))
+v_all_pre[is.na(v_all_pre)] <- 0
+
+pdf(file = "figure_intersection_differet_body_sites_ClassII_bacteriocins.pdf",height = 4, width = 7)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+upset(v_all_pre, sets = c("Posterior_fornix","Stool","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum","Anterior_nares"),
+            order.by = "freq", sets.x.label = "Number of clusters")
+dev.off()
+
+# overall pie plot
+no_gcf_bodysite <- rowSums(v_all_pre[,2:ncol(v_all_pre)]) %>% table() %>% as.data.frame()
+names(no_gcf_bodysite) <- c("number_bodysite", "gcf_count")
+label_value <- paste('(', round(no_gcf_bodysite$gcf_count/sum(no_gcf_bodysite$gcf_count) * 100, 2), '%)', sep = '')
+label <- paste(no_gcf_bodysite$number_bodysite, label_value, sep = ' ')
+
+no_gcf_bodysite <- no_gcf_bodysite %>% 
+                    arrange(desc(number_bodysite)) %>%
+                    mutate(prop = gcf_count / sum(no_gcf_bodysite$gcf_count) *100) %>%
+                    mutate(ypos = cumsum(prop)- 0.5*prop )
+no_gcf_bodysite$label <- paste(no_gcf_bodysite$number_bodysite, " (", round(no_gcf_bodysite$prop,2),"%)", sep = "")
+
+p_pie <- ggplot(no_gcf_bodysite, aes(x="", y=prop, fill=number_bodysite)) +
+        geom_bar(stat="identity", width=1, color="white") +
+        coord_polar("y", start=0) +
+        theme_void() + 
+        theme(legend.position="none") +
+        geom_text(aes(y = ypos, label = label), color = "white", size=6) +
+        scale_fill_brewer(palette="Set1")
+
+ggsave(filename = "piechart_classII_bacteriocins_different_body_sites.pdf",plot = p_pie, useDingbats = FALSE, width = 3,height = 3)
+
+#######################################################
+# 4. Precursors from GCF_122
+#######################################################
+df_gcf122_precursors <- unique(df_precursors[df_precursors$BGC_family=="GCF_122", ]$Cluster_re)
+df_nor_Anterior_nares_pre_f3_gcf122 <- df_nor_Anterior_nares_pre_f3 %>% filter(Cluster_re %in% df_gcf122_precursors)
+df_nor_supragingival_plaque_pre_f3_gcf122 <- df_nor_supragingival_plaque_pre_f3 %>% filter(Cluster_re %in% df_gcf122_precursors)
+df_nor_buccal_mucosa_pre_f3_gcf122 <- df_nor_buccal_mucosa_pre_f3 %>% filter(Cluster_re %in% df_gcf122_precursors)
+df_nor_tongue_dorsum_pre_f3_gcf122 <- df_nor_tongue_dorsum_pre_f3 %>% filter(Cluster_re %in% df_gcf122_precursors)
+df_nor_posterior_fornix_pre_f3_gcf122 <- df_nor_posterior_fornix_pre_f3 %>% filter(Cluster_re %in% df_gcf122_precursors)
+df_nor_stool_pre_f3_gcf122 <- df_nor_stool_pre_f3 %>% filter(Cluster_re %in% df_gcf122_precursors)
+
+df_abundance_merge_pre_gcf_122 <- df_abundance_merge_pre[rownames(df_abundance_merge_pre) %in% df_gcf122_precursors, ]
+df_abundance_merge_pre_gcf_122_f <- df_abundance_merge_pre_gcf_122[,colSums(df_abundance_merge_pre_gcf_122)>0]
+
+# PCA
+pca_gcf122 <- prcomp(t(df_abundance_merge_pre_gcf_122_f), scale. = FALSE)
+df_pca <- as.data.frame(pca_gcf122$x)
+df_pca$sample <- rownames(df_pca)
+df_pca_merge <- merge(df_pca, sample_meta_pre, by="sample", all.x = TRUE)
+df_pca_merge$sites <- factor(df_pca_merge$sites, levels = c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum"))
+summ <- summary(pca)
+my_col <- c("#ff9d00", "#0039ff", "#ff0000", "#00fd00", "#000000", "#d5d6d5")
+p_pca <- ggplot(df_pca_merge,aes(x=PC1,y=PC2,color=sites))+ 
+          geom_point()+
+          theme_base()+
+          scale_color_manual(values = my_col)+
+          xlab(paste0("PC1 (",round(summ$importance[2,1]*100,2),"%)"))+
+          ylab(paste0("PC2 (",round(summ$importance[2,2]*100,2),"%)"))+
+          theme(axis.text = element_text(size = 14, colour = "black"),
+                axis.title = element_text(size = 16, colour = "black"))
+p_pca
+
+# t-sne clustering
+df_abundance_merge_pre_gcf_122_f <- df_abundance_merge_pre_gcf_122[,colSums(df_abundance_merge_pre_gcf_122)>0]
+set.seed(123)
+perplexity <- floor((nrow(df_abundance_merge_pre_gcf_122_f) -1) / 3)
+if (perplexity>0){
+  if (perplexity>30){
+    perplexity <- 30
+  }}
+tsne_out <- Rtsne(t(df_abundance_merge_pre_gcf_122_f), perplexity=perplexity, check_duplicates = FALSE)
+data <- data.frame(tsne_out$Y, colnames(df_abundance_merge_pre_gcf_122_f))
+names(data) <- c("tSNE1", "tSNE2", "sample")
+
+data_m <- merge(data, sample_meta_pre, by = "sample", all.x = TRUE)
+data_m$sample <- factor(data_m$sample, levels = c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum"))
+
+p_tsne <- ggplot(data_m, aes(x = tSNE1, y = tSNE2, colour = sites)) + 
+                    geom_point(alpha = 1) +
+                    theme_base() +
+                    scale_color_manual(values = my_col)+
+                    #scale_color_d3(palette="category20") +
+                    theme(axis.text = element_text(size = 14, colour = "black"),
+                            axis.title = element_text(size = 16, colour = "black"),
+                            plot.title = element_text(hjust = 0.5),
+                            panel.border = element_blank())
+ggsave(filename = "figures_tsne_clustering_GCF_122_precursors_in_different_body_sites.pdf", p_tsne, useDingbats = FALSE, width = 7.5,height = 5)
+
+# pairwise ANOSIM for raw data
+df_R_pvalue <- data.frame(group_1 = "str",
+                          group_2 = "str",
+                          Globe_R = 0.1,
+                          p_value = 0.1)
+df_abundance_merge_pre_f_t <- df_abundance_merge_pre_gcf_122_f %>% t() %>% as.data.frame()
+for (i in 1:5){
+  for (j in (i+1):6){
+    select_site <- unique(sample_meta_pre$sites)[c(i, j)]
+    subset_data <- df_abundance_merge_pre_f_t[intersect(rownames(df_abundance_merge_pre_f_t), sample_meta_pre[sample_meta_pre$sites %in% select_site, ]$sample),]
+    subset_group <- sample_meta_pre[sample_meta_pre$sample %in% rownames(subset_data), ]
+    index <- factor(subset_group$sites, levels = rownames(subset_data))
+    subset_group <- subset_group[order(index),]
+    subset_dist <- vegdist(as.matrix(subset_data), method = "euclidean")
+    anosim_result <- anosim(subset_dist, subset_group$sites, permutations = 999)
+    summary(anosim_result)
+    #plot(anosim_result)
+    df_R_pvalue <- rbind(df_R_pvalue, c(unique(sample_meta_pre$sites)[i],unique(sample_meta_pre$sites)[j],anosim_result$statistic,anosim_result$signif))
+  }
+}
+df_R_pvalue <- df_R_pvalue[-1,]
+df_R_pvalue
+write.csv(df_R_pvalue, "pariwise_ANOSIM_test_different_body_sites_in_GCF122_precursors.csv")
+
+
+# upset plot
+v_Posterior_fornix_pre <- data.frame(gcf=df_nor_posterior_fornix_pre_f3_gcf122$Cluster_re, Posterior_fornix=1, stringsAsFactors = FALSE)
+v_Stool_pre <- data.frame(gcf=df_nor_stool_pre_f3_gcf122$Cluster_re, Stool=1, stringsAsFactors = FALSE)
+v_Supragingival_plaque_pre <- data.frame(gcf=df_nor_supragingival_plaque_pre_f3_gcf122$Cluster_re, Supragingival_plaque=1, stringsAsFactors = FALSE)
+v_Buccal_mucosa_pre <- data.frame(gcf=df_nor_buccal_mucosa_pre_f3_gcf122$Cluster_re, Buccal_mucosa=1, stringsAsFactors = FALSE)
+v_Tongue_dorsum_pre <- data.frame(gcf=df_nor_tongue_dorsum_pre_f3_gcf122$Cluster_re, Tongue_dorsum=1, stringsAsFactors = FALSE)
+v_Anterior_nares_pre <- data.frame(gcf=df_nor_Anterior_nares_pre_f3_gcf122$Cluster_re, Anterior_nares=1, stringsAsFactors = FALSE)
+
+v_all_pre <- Reduce(function(x,y) merge(x = x, y = y, by = "gcf", all=TRUE), 
+                  list(v_Posterior_fornix_pre, v_Stool_pre, v_Supragingival_plaque_pre, v_Buccal_mucosa_pre, v_Tongue_dorsum_pre, v_Anterior_nares_pre))
+v_all_pre[is.na(v_all_pre)] <- 0
+
+pdf(file = "figure_4B_GCF_intersection_differet_body_sites_ClassII_bacteriocins_GCF122.pdf",height = 4, width = 7)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+upset(v_all_pre, sets = c("Posterior_fornix","Stool","Supragingival_plaque","Buccal_mucosa","Tongue_dorsum","Anterior_nares"),
+            order.by = "freq", sets.x.label = "Number of clusters")
+dev.off()
+
+
+#######################################################
+# 5. common clusters in different body sites
+#######################################################
+v_common_pre <- v_all_pre[rowSums(v_all_pre[,2:7])==6,]$gcf
+
+df_common_Anterior_nares_pre <- df_nor_Anterior_nares_pre_f3[df_nor_Anterior_nares_pre_f3$Cluster_re %in% v_common_pre, ]
+df_common_gut_pre <- df_nor_stool_pre_f3[df_nor_stool_pre_f3$Cluster_re %in% v_common_pre, ]
+df_common_vaginal_pre <- df_nor_posterior_fornix_pre_f3[df_nor_posterior_fornix_pre_f3$Cluster_re %in% v_common_pre, ]   
+df_common_oral_pre <- df_nor_supragingival_plaque_pre_f3[df_nor_supragingival_plaque_pre_f3$Cluster_re %in% v_common_pre, ]
+df_common_Buccal_mucosa_pre <- df_nor_buccal_mucosa_pre_f3[df_nor_buccal_mucosa_pre_f3$Cluster_re %in% v_common_pre, ]
+df_common_Tongue_dorsum_pre <- df_nor_tongue_dorsum_pre_f3[df_nor_tongue_dorsum_pre_f3$Cluster_re %in% v_common_pre, ]
+
+df_common_Anterior_nares_abu_pre <- f_pre_abu(df_common_Anterior_nares_pre, "Anterior_nares")
+df_common_gut_abu_pre <- f_pre_abu(df_common_gut_pre, "Stool")
+df_common_vaginal_abu_pre <- f_pre_abu(df_common_vaginal_pre, "Posterior_fornix")
+df_common_oral_abu_pre <- f_pre_abu(df_common_oral_pre, "Supragingival_plaque")
+df_common_Buccal_mucosa_abu_pre <- f_pre_abu(df_common_Buccal_mucosa_pre, "Buccal_mucosa")
+df_common_Tongue_dorsum_abu_pre <- f_pre_abu(df_common_Tongue_dorsum_pre, "Tongue_dorsum")
+
+df_commom_pre_abu_all <- rbind(df_common_Anterior_nares_abu_pre,
+                               df_common_gut_abu_pre,
+                               df_common_vaginal_abu_pre,
+                               df_common_oral_abu_pre,
+                               df_common_Buccal_mucosa_abu_pre,
+                               df_common_Tongue_dorsum_abu_pre)
+df_commom_pre_abu_all$body_site <- factor(df_commom_pre_abu_all$body_site, levels = rev(c("Anterior_nares","Stool","Posterior_fornix","Supragingival_plaque","Buccal_mucosa", "Tongue_dorsum")))
+
+p_common_pre <- ggplot(df_commom_pre_abu_all, aes(body_site,genus))+
+            geom_point(aes(size=prevalence, color=abundance))+
+            scale_colour_gradient2(low="#008000",mid="#cc9900",high="#ff0000", midpoint=max(df_commom_pre_abu_all$abundance)/2)+
+            coord_flip()+
+            theme_bw()+
+            xlab("")+
+            ylab("")+
+            theme(axis.text = element_text(color = "black", size = 12),
+                  axis.text.x = element_text(angle = 90, hjust = 1, vjust = 1))
+
+ggsave(filename = "figures_common_classII_bacteriocins_prevalence_abundance_differet_body_sites.pdf",plot = p_common_pre, useDingbats = FALSE, width = 10, height = 4)
+```
+
+
+# check the expression in vagina metatranscriptom
+```{r}
+identical(df_read_no_vagina_MT$file, names(df_bgc_genes_vagina_MT)[7:ncol(df_bgc_genes_vagina_MT)])
+
+df_bgc_nor_vagina_MT <- abu(df_bgc_genes_vagina_MT, df_read_no_vagina_MT$num_seqs)
+
+################################################################################
+# Abundance at GCF level (filter biosynthesis-related genes)
+################################################################################
+df_bgc_nor_vagina_MT_f <- df_bgc_nor_vagina_MT %>% filter(Geneid %in% biosynthetic_related_genes$V1)
+df_bgc_nor_vagina_MT_f <- subset(df_bgc_nor_vagina_MT_f, select=-Geneid)
+# abundance at BGC level, attribute the average abundance of BGC genes to a BGC
+df_bgc_nor_vagina_MT_f <- aggregate(. ~ GCF, data = df_bgc_nor_vagina_MT_f, mean)
+# attribute 0 to BGCs that are considered as absent
+rownames(df_bgc_present_vagina_MT) <- df_bgc_present_vagina_MT$Samples
+df_bgc_present_vagina_MT <- subset(df_bgc_present_vagina_MT, select = -Samples)
+df_bgc_present_vagina_MT_f <- df_bgc_present_vagina_MT %>% t() %>% as.data.frame()
+
+identical(names(df_bgc_present_vagina_MT_f), names(df_bgc_nor_vagina_MT_f)[2:ncol(df_bgc_nor_vagina_MT_f)])
+
+df_bgc_nor_vagina_MT_f[,2:ncol(df_bgc_nor_vagina_MT_f)][df_bgc_present_vagina_MT_f==0] <- 0
+# abundance at GCF level, attribute the sum abundance of BGC genes to GCF
+df_bgc_nor_vagina_MT_f2 <- df_bgc_nor_vagina_MT_f
+df_bgc_nor_vagina_MT_f2$GCF <- gsub("__unique_\\d+", "", df_bgc_nor_vagina_MT_f2$GCF)
+df_bgc_nor_vagina_MT_f2 <- aggregate(.~GCF, df_bgc_nor_vagina_MT_f2, sum)
+df_bgc_nor_vagina_MT_f2 <- df_bgc_nor_vagina_MT_f2[df_bgc_nor_vagina_MT_f2$GCF!="GCF_NA",]
+
+
+################################################################################
+# Abundance of precursors
+################################################################################
+df_bgc_nor_vagina_MT_pre <- df_bgc_nor_vagina_MT %>% filter(Geneid %in% df_precursors$Raw)
+df_bgc_nor_vagina_MT_pre <- subset(df_bgc_nor_vagina_MT_pre, select = -GCF)
+df_bgc_nor_vagina_MT_pre_f <- df_bgc_nor_vagina_MT_pre[rowSums(df_bgc_nor_vagina_MT_pre[,1:ncol(df_bgc_nor_vagina_MT_pre)-1])>0,]
+# aggregate abundance of each precursors into precursor clusters
+df_bgc_nor_vagina_MT_pre_f2 <- merge(df_bgc_nor_vagina_MT_pre_f, df_precursors[,c("Raw","Cluster_re")], by.x = "Geneid", by.y = "Raw", all.x = TRUE)
+df_bgc_nor_vagina_MT_pre_f2 <- subset(df_bgc_nor_vagina_MT_pre_f2, select = -Geneid)
+df_bgc_nor_vagina_MT_pre_f3 <- aggregate(. ~ Cluster_re, data = df_bgc_nor_vagina_MT_pre_f2, sum)
+
+f_pre_abu_mean <- function(d_f, site){
+  df_tmp <- d_f[,2:ncol(d_f)]
+  df_tmp <- as.data.frame(sapply(df_tmp, as.numeric))
+  prevalence <- rowSums(df_tmp>0)/ncol(d_f)*100
+  median_abundance <- apply(df_tmp, 1, mean)
+  df_site <- data.frame(genus = d_f[,1],
+                        prevalence = prevalence,
+                        abundance = median_abundance,
+                        body_site = site,
+                        stringsAsFactors = FALSE)
+  df_site <- df_site[df_site$prevalence != 0, ]
+  return(df_site)
+}
+
+df_bgc_nor_vagina_MT_pre_sort <- f_pre_abu_mean(df_bgc_nor_vagina_MT_pre_f3, "Vagina_MT")
+df_bgc_nor_vagina_MT_pre_sort <- df_bgc_nor_vagina_MT_pre_sort[order(df_bgc_nor_vagina_MT_pre_sort$abundance, decreasing = TRUE), ]
+
+```
+
+
+# correlation between Class II bacteriocin precursors and species in vagina
+```{r}
+# spearman correlation between species vs. precursors
+df_nor_posterior_fornix_pre_f4 <- df_nor_posterior_fornix_pre_f3
+rownames(df_nor_posterior_fornix_pre_f4) <- df_nor_posterior_fornix_pre_f4$Cluster_re
+df_nor_posterior_fornix_pre_f4 <- subset(df_nor_posterior_fornix_pre_f4, select = -Cluster_re)
+df_species_posterior_fornix_f <- df_species_posterior_fornix[,names(df_nor_posterior_fornix_pre_f4)]
+identical(names(df_nor_posterior_fornix_pre_f4), names(df_species_posterior_fornix_f))
+
+df_species_posterior_fornix_f <- mutate_all(df_species_posterior_fornix_f, function(x) as.numeric(as.character(x)))
+
+occor <- corr.test(t(df_nor_posterior_fornix_pre_f4), t(df_species_posterior_fornix_f), use="pairwise", method="spearman",adjust="BH",alpha=.05)
+occor.r <- occor$r 
+occor.p <- occor$p 
+
+occor.r[occor.p>0.05|abs(occor.r)<0.3] = 0 
+
+write.csv(occor.r, file="classII_bacteriocins_species_in_vagina_0.05_0.3.csv")
+
+# average abundance and prevalence in metagenome
+df_bgc_nor_vagina_MG_pre <- f_pre_abu_mean(df_nor_posterior_fornix_pre_f3, "Vagina_MG")
+df_bgc_nor_vagina_MG_pre <- df_bgc_nor_vagina_MG_pre[order(df_bgc_nor_vagina_MG_pre$abundance, decreasing = TRUE), ]
+
+# spearman correlation between alpha diversity vs. precursors
+dt <- df_species_posterior_fornix_f[rowSums(df_species_posterior_fornix_f)>0,]
+dt_t <- t(dt*10^12)
+df_shannon <- diversity(t(dt), index = "shannon") %>% as.data.frame()
+names(df_shannon) <- "shannon"
+identical(names(df_nor_posterior_fornix_pre_f4), rownames(df_shannon))
+occor_pre_shannon <- corr.test(t(df_nor_posterior_fornix_pre_f4), df_shannon, use="pairwise", method="spearman",adjust="BH",alpha=.05)
+occor_pre_shannon.r <- occor_pre_shannon$r
+occor_pre_shannon.p <- occor_pre_shannon$p 
+
+df_occor_pre_shannon.r <- occor_pre_shannon.r %>% as.data.frame()
+names(df_occor_pre_shannon.r) <- "corrlation"
+df_occor_pre_shannon.p <- occor_pre_shannon.p %>% as.data.frame()
+names(df_occor_pre_shannon.p) <- "pvalue"
+
+df_occor_pre_shannon.r$cluster <- rownames(df_occor_pre_shannon.r)
+df_occor_pre_shannon.p$cluster <- rownames(df_occor_pre_shannon.p)
+
+df_cor_m <- merge(df_occor_pre_shannon.r, df_occor_pre_shannon.p, by="cluster", all.x = TRUE)
+df_cor_m$logP <- -log10(df_cor_m$pvalue)
+rownames(df_cor_m) <- df_cor_m$cluster
+write.csv(df_cor_m, file="spearman_corrlation_between_precursos_shannon.csv")
+df_cor_m$class <- ifelse(abs(df_cor_m$corrlation)>0.4 & df_cor_m$pvalue < 0.05, "Sig", "Ns")
+p_shanon_pre <- ggplot(df_cor_m, aes(x=corrlation, y=logP, col=class)) + 
+                  geom_point()+
+                  geom_text_repel(aes(label=cluster))+
+                  scale_color_manual(values = c("grey", "blue"))+
+                  theme_bw()+
+                  geom_hline(yintercept=-log10(0.05), linetype="dashed", color = "grey")+
+                  geom_vline(xintercept=-0.4, linetype="dashed", color = "grey")+
+                  xlab("Spearman's rank correlation coefficient")+
+                  ylab("-log10(adjusted P)")+
+                  theme(legend.position = "none")
+ggsave(filename = "figures_spearman_correlation_between_classII_bacteriocins_and_shannon.pdf",plot = p_shanon_pre, useDingbats = FALSE, width = 5, height = 4.5)
+
+####################################################################
+# Abundance of selected clusters
+####################################################################
+select_cluster <- df_cor_m[df_cor_m$corrlation< -0.3, ]$cluster
+
+df_bgc_nor_vagina_MG_pre_select <- df_bgc_nor_vagina_MG_pre %>% filter(genus %in% select_cluster)
+df_bgc_nor_vagina_MT_pre_sort_select <- df_bgc_nor_vagina_MT_pre_sort %>% filter(genus %in% select_cluster)
+
+df_pre_select <- rbind(df_bgc_nor_vagina_MG_pre_select, df_bgc_nor_vagina_MT_pre_sort_select)
+df_pre_select$genus <- factor(df_pre_select$genus, levels = df_bgc_nor_vagina_MG_pre_select$genus)
+
+p_pre_select <- ggplot(df_pre_select, aes(body_site,genus))+
+                geom_point(aes(size=prevalence, color=abundance))+
+                scale_colour_gradient2(low="#008000",mid="#cc9900",high="#ff0000", midpoint=max(df_pre_select$abundance)/2)+
+                coord_flip()+
+                theme_bw()+
+                xlab("")+
+                ylab("")+
+                theme(axis.text = element_text(color = "black", size = 12),
+                      axis.text.x = element_text(angle = 90, hjust = 1, vjust = 1))
+ggsave(filename = "figures_select_precurs_abundance_in_MG_and_MT.pdf",plot = p_pre_select, useDingbats = FALSE, width = 10, height = 3)
+
+# plot precursor length
+df_select_length <- data.frame()
+for (i in select_cluster){
+  df_precursors_select <- df_precursors[df_precursors$Cluster_re==i,]
+  length_median <- median(df_precursors_select$length)
+  df_tmp <- data.frame(cluster=i, length_median=length_median)
+  df_select_length <- rbind(df_select_length, df_tmp)
+}
+
+df_select_length$cluster <- factor(df_select_length$cluster, levels = df_bgc_nor_vagina_MG_pre_select$genus)
+p_length <- ggplot(df_select_length, aes(x=cluster, y=length_median)) + 
+                geom_bar(stat = "identity")+
+                theme_bw()+
+                xlab("")+
+                ylab("")+
+                theme(axis.text = element_text(color = "black", size = 12),
+                      axis.text.x = element_text(angle = 90, hjust = 1, vjust = 1))
+ggsave(filename = "figures_select_precurs_length.pdf",plot = p_length, useDingbats = FALSE, width = 10, height = 2)
+
+```
+
+
+

@@ -1,0 +1,567 @@
+---
+title: "machine_leaning_for_activity_prediction"
+output: html_document
+date: '2022-04-04'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# load requirements
+```{r}
+library(mlr)
+library(tidyverse)
+library(openxlsx)
+library(parallelMap)
+library(parallel)
+library(ggthemes)
+library(ggpubr)
+library(ggsci)
+library(circlize)
+library(webshot)
+```
+
+
+# load inputs
+```{r}
+df_mibig_activity <- read.xlsx("mibig_overall_doubleCheck.xlsx", sheet = 1)
+df_mibig2.0_bgc <- read.delim("bgc.csv", sep=",")
+df_mibig2.0_domain <- read.delim2("mibig__hmm_presence_matrix.tsv", check.names = FALSE)
+# replace space with dot as space is not allowed in the downstream analysis
+names(df_mibig2.0_domain) <- gsub(" ",".",names(df_mibig2.0_domain))
+
+dfmibig2.0_domain_m <- merge(df_mibig2.0_bgc[,c("id", "name")], df_mibig2.0_domain, by.x = "id", by.y = "bgc_id", all.x = TRUE)
+dfmibig2.0_domain_m_f <- dfmibig2.0_domain_m %>% mutate(mibigID=str_extract(name, "BGC\\d+")) %>% select(-c(id, name))
+
+df_mibig_activity$combine <- NA
+for (i in 1:nrow(df_mibig_activity)){
+  df_mibig_activity$combine[i] <- paste(names(df_mibig_activity)[4:6][df_mibig_activity[i,4:6]==1],collapse = "_AND_")
+}
+
+df_mibig_fun_domain <- merge(df_mibig_activity[,c("mibigID","combine")], dfmibig2.0_domain_m_f, by="mibigID", all.x = TRUE)
+df_mibig_fun_domain <- na.omit(df_mibig_fun_domain)
+# remove domains present in < 10 samples
+df_mibig_fun_domain_f <- df_mibig_fun_domain[,c("mibigID","combine",names(df_mibig_fun_domain)[3:6884][colSums(df_mibig_fun_domain[,3:6884])>10])]
+names(df_mibig_fun_domain_f) <- c("mibigID","combine",paste("domain_",1:(ncol(df_mibig_fun_domain_f)-2),sep = ""))
+
+# split into two groups, with bioactivity or without
+df_mibig_fun_domain_known <- df_mibig_fun_domain_f %>% filter(combine!="")
+df_mibig_fun_domain_unknown <- df_mibig_fun_domain_f %>% filter(combine=="")
+df_mibig_fun_domain_known <- df_mibig_fun_domain_known %>% select(-mibigID)
+df_mibig_fun_domain_unknown <- df_mibig_fun_domain_unknown %>% select(-mibigID)
+df_mibig_fun_domain_known_tb <- as_tibble(df_mibig_fun_domain_known)
+df_mibig_fun_domain_unknown_tb <- as_tibble(df_mibig_fun_domain_unknown)
+# convert to factor
+df_mibig_fun_domain_known_tb$combine <- as.factor(df_mibig_fun_domain_known_tb$combine)
+df_mibig_fun_domain_unknown_tb$combine <- as.factor(df_mibig_fun_domain_unknown_tb$combine)
+
+
+# split into several groups according to different bioactivities
+# Note: exclude those with unknown function to reduce noise
+df_mibig_antibacterial <- df_mibig_activity %>% select(c("mibigID", "antibacterial")) %>% filter(df_mibig_activity$unknown==0)
+df_mibig_antifungal <- df_mibig_activity %>% select(c("mibigID", "antifungal")) %>% filter(df_mibig_activity$unknown==0)
+df_mibig_cytotoxic <- df_mibig_activity %>% select(c("mibigID", "antitumor_OR_cytotoxic")) %>% filter(df_mibig_activity$unknown==0)
+
+df_mibig_antibacterial_m <- merge(df_mibig_antibacterial, dfmibig2.0_domain_m_f, by="mibigID", all.x = TRUE)
+df_mibig_antifungal_m <- merge(df_mibig_antifungal, dfmibig2.0_domain_m_f, by="mibigID", all.x = TRUE)
+df_mibig_cytotoxic_m <- merge(df_mibig_cytotoxic, dfmibig2.0_domain_m_f, by="mibigID", all.x = TRUE)
+
+df_mibig_antibacterial_m <- na.omit(df_mibig_antibacterial_m)
+df_mibig_antifungal_m <- na.omit(df_mibig_antifungal_m)
+df_mibig_cytotoxic_m <- na.omit(df_mibig_cytotoxic_m)
+
+# remove domains present in < 10 samples
+df_mibig_antibacterial_m_f <- df_mibig_antibacterial_m[,c("mibigID","antibacterial",names(df_mibig_antibacterial_m)[3:6884][colSums(df_mibig_antibacterial_m[,3:6884])>10])]
+domain_names_alter <- data.frame(raw=names(df_mibig_antibacterial_m_f)[3:ncol(df_mibig_antibacterial_m_f)],
+                                  alter=paste("domain_",1:(ncol(df_mibig_antibacterial_m_f)-2),sep = ""))
+write.table(domain_names_alter, file="domain_to_feature_rename.tsv", sep = "\t", row.names = FALSE)
+names(df_mibig_antibacterial_m_f) <- c("mibigID","activity",paste("domain_",1:(ncol(df_mibig_antibacterial_m_f)-2),sep = ""))
+
+df_mibig_antifungal_m_f <- df_mibig_antifungal_m[,c("mibigID","antifungal",names(df_mibig_antifungal_m)[3:6884][colSums(df_mibig_antifungal_m[,3:6884])>10])]
+names(df_mibig_antifungal_m_f) <- c("mibigID","activity",paste("domain_",1:(ncol(df_mibig_antifungal_m_f)-2),sep = ""))
+df_mibig_cytotoxic_m_f <- df_mibig_cytotoxic_m[,c("mibigID","antitumor_OR_cytotoxic",names(df_mibig_cytotoxic_m)[3:6884][colSums(df_mibig_cytotoxic_m[,3:6884])>10])]
+names(df_mibig_cytotoxic_m_f) <- c("mibigID","activity",paste("domain_",1:(ncol(df_mibig_cytotoxic_m_f)-2),sep = ""))
+
+df_mibig_antibacterial_m_f <- df_mibig_antibacterial_m_f %>% select(-mibigID)
+df_mibig_antifungal_m_f <- df_mibig_antifungal_m_f %>% select(-mibigID)
+df_mibig_cytotoxic_m_f <- df_mibig_cytotoxic_m_f %>% select(-mibigID)
+
+df_mibig_antibacterial_m_f_tb <- as_tibble(df_mibig_antibacterial_m_f)
+df_mibig_antifungal_m_f_tb <- as_tibble(df_mibig_antifungal_m_f)
+df_mibig_cytotoxic_m_f_tb <- as_tibble(df_mibig_cytotoxic_m_f)
+
+# convert into factors
+df_mibig_antibacterial_m_f_tb <- mutate_all(df_mibig_antibacterial_m_f_tb, factor)
+df_mibig_antifungal_m_f_tb <- mutate_all(df_mibig_antifungal_m_f_tb, factor)
+df_mibig_cytotoxic_m_f_tb <- mutate_all(df_mibig_cytotoxic_m_f_tb, factor)
+```
+
+
+# inspect training dataset
+```{r}
+df_bgc_mibig <- read.delim2("mibig_2.0_statistics.tsv")
+df_bgc_mibig_actibaterial <- merge(df_mibig_antibacterial_m[,c("mibigID","antibacterial")],df_bgc_mibig[,c("Genome","Type"),],  by.x="mibigID", by.y="Genome", all.x=TRUE)
+
+df_antibacterial <-data.frame(class=rep("antibacterial", nrow(df_mibig_antibacterial_m_f)),
+                              activity=df_mibig_antibacterial_m_f$activity, stringsAsFactors = FALSE)
+t_antifungal <-data.frame(class=rep("antifungal", nrow(df_mibig_antifungal_m_f)),
+                          activity=df_mibig_antifungal_m_f$activity, stringsAsFactors = FALSE)
+t_antitumor <-data.frame(class=rep("antitumor", nrow(df_mibig_cytotoxic_m_f_tb)),
+                         activity=df_mibig_cytotoxic_m_f_tb$activity, stringsAsFactors = FALSE)
+df_activity_bind <- rbind(df_antibacterial, t_antifungal, t_antitumor)
+df_activity_bind_t <- table(df_activity_bind)
+
+pdf(file = "Reference_datasets.pdf",,height = 10, width = 10)
+par(mar=c(4,4,4,4)+0.1,xpd=TRUE)
+mosaic(df_activity_bind_t,shade=TRUE,legend=TRUE,color=TRUE)
+dev.off()
+
+```
+
+
+# mechine learning for activity prediction (twoclass)
+```{r}
+##############################################
+# Develop four models
+##############################################
+# set cross-validation for tuning hyperparameters and validating model
+set.seed(123)
+randSearch <- makeTuneControlRandom(maxit = 50)
+cvForTuning <- makeResampleDesc("CV", iters=3, stratify = TRUE) # 3-fold cross-validation for tuning inner parameters
+kFold5 <- makeResampleDesc(method = "CV", iters=5, stratify = TRUE)
+kFold10 <- makeResampleDesc(method = "CV", iters=10, stratify = TRUE)
+antibacterialTask <- makeClassifTask(data = df_mibig_antibacterial_m_f_tb, positive="1", target = "activity")
+antifungalTask <- makeClassifTask(data = df_mibig_antifungal_m_f_tb, positive="1", target = "activity")
+anticytotoxicTask <- makeClassifTask(data = df_mibig_cytotoxic_m_f_tb, positive="1", target = "activity")
+
+# define learners
+# logistic
+logisticLearner <- makeLearner("classif.logreg", predict.type = "prob")
+# random forest
+forestParamSpace <- makeParamSet(makeIntegerParam("ntree", lower = 100, upper = 500),
+                                 makeIntegerParam("mtry", lower = 1, upper = 50),
+                                 makeIntegerParam("nodesize", lower = 1, upper = 50))
+foresetLearner <- makeLearner("classif.randomForest", predict.type = "prob")
+forestWrapper2 <- makeTuneWrapper(foresetLearner, resampling = cvForTuning, par.set = forestParamSpace, control = randSearch)
+# svm
+kernels <- c("polynomial", "radial", "sigmoid")
+svmParamSpace <- makeParamSet(makeDiscreteParam("kernel", values = kernels),
+                              makeIntegerParam("degree", lower = 1, upper = 3),
+                              makeNumericParam("cost", lower = 0.1, upper = 10),
+                              makeNumericParam("gamma", lower = 0.1, upper = 10))
+svmLearner <- makeLearner("classif.svm", predict.type = "prob")
+svmWrapper2 <- makeTuneWrapper(svmLearner, resampling = cvForTuning, par.set = svmParamSpace, control = randSearch)
+# elastic
+elasticParamSpace <- makeParamSet(makeNumericParam("s", lower = 0, upper = 20),
+                                         makeNumericParam("alpha", lower = 0, upper = 1))
+elasticLearner <- makeLearner("classif.glmnet", predict.type = "prob")
+elasticWrapper2 <- makeTuneWrapper(elasticLearner, resampling = cvForTuning, par.set = elasticParamSpace, control = randSearch)
+
+
+# benchmark for logistic regression, RandomForest, svm, elastic from glmnet library
+set.seed(123, "L'Ecuyer")
+learners <- list(logisticLearner, forestWrapper2, svmWrapper2, elasticWrapper2)
+parallelStartSocket(cpus = detectCores())
+#svmTune <- resample(svmWrapper2, antibacterialTask, resampling = kFold10, measures = list(acc, bac, mlr::auc))
+bench_antibacterial <- benchmark(learners, antibacterialTask, kFold10, measures = list(acc, bac, mmce, mlr::auc), models=TRUE, keep.extract=TRUE)
+bench_antifungal <- benchmark(learners, antifungalTask, kFold10, measures = list(acc, bac, mmce, mlr::auc), models=TRUE, keep.extract=TRUE)
+bench_cytotoxic <- benchmark(learners, anticytotoxicTask, kFold10, measures = list(acc, bac, mmce, mlr::auc), models=TRUE, keep.extract=TRUE)
+parallelStop()
+bench_antibacterial
+bench_antifungal
+bench_cytotoxic
+
+save(bench_antibacterial, file = "bench_antibacterial.RData")
+save(bench_antifungal, file = "bench_antifungal.RData")
+save(bench_cytotoxic, file = "bench_cytotoxic.RData")
+
+##############################################
+# visualize the performance
+##############################################
+# AUC of 10-fold CVs
+df_antibacterial_auc <- data.frame(logistic=bench_antibacterial$results$df_mibig_antibacterial_m_f_tb$classif.logreg$measures.test$auc,
+                                   randomForest=bench_antibacterial$results$df_mibig_antibacterial_m_f_tb$classif.randomForest.tuned$measures.test$auc,
+                                   elastic=bench_antibacterial$results$df_mibig_antibacterial_m_f_tb$classif.glmnet.tuned$measures.test$auc,
+                                   svm=bench_antibacterial$results$df_mibig_antibacterial_m_f_tb$classif.svm.tuned$measures.test$auc,
+                                   stringsAsFactors = FALSE)
+df_antifungal_auc <- data.frame(logistic=bench_antifungal$results$df_mibig_antifungal_m_f_tb$classif.logreg$measures.test$auc,
+                                   randomForest=bench_antifungal$results$df_mibig_antifungal_m_f_tb$classif.randomForest.tuned$measures.test$auc,
+                                   elastic=bench_antifungal$results$df_mibig_antifungal_m_f_tb$classif.glmnet.tuned$measures.test$auc,
+                                   svm=bench_antifungal$results$df_mibig_antifungal_m_f_tb$classif.svm.tuned$measures.test$auc,
+                                   stringsAsFactors = FALSE)
+df_cytotoxic_auc <- data.frame(logistic=bench_cytotoxic$results$df_mibig_cytotoxic_m_f_tb$classif.logreg$measures.test$auc,
+                                   randomForest=bench_cytotoxic$results$df_mibig_cytotoxic_m_f_tb$classif.randomForest.tuned$measures.test$auc,
+                                   elastic=bench_cytotoxic$results$df_mibig_cytotoxic_m_f_tb$classif.glmnet.tuned$measures.test$auc,
+                                   svm=bench_cytotoxic$results$df_mibig_cytotoxic_m_f_tb$classif.svm.tuned$measures.test$auc,
+                                   stringsAsFactors = FALSE)
+df_antibacterial_auc_melt <- reshape2::melt(df_antibacterial_auc)
+df_antifungal_auc_melt <- reshape2::melt(df_antifungal_auc)
+df_cytotoxic_auc_melt <- reshape2::melt(df_cytotoxic_auc)
+
+p_antibacterial <- ggplot(df_antibacterial_auc_melt, aes(x=variable, y=value)) +
+                      geom_boxplot(fill="#436b92") +
+                      theme_bw() +
+                      ggtitle("Antibacterial") +
+                      xlab("")+
+                      ylab("AUC of 10-fold cross-validation")+
+                      theme(plot.title = element_text(hjust = 0.5),
+                            axis.text = element_text(colour = "black", size = 10),
+                            axis.title = element_text(colour = "black", size = 12))
+p_antifungal <- ggplot(df_antifungal_auc_melt, aes(x=variable, y=value)) +
+                      geom_boxplot(fill="#d77a47") +
+                      theme_bw() +
+                      ggtitle("Antifungal") +
+                      xlab("")+
+                      ylab("AUC of 10-fold cross-validation")+
+                      theme(plot.title = element_text(hjust = 0.5),
+                            axis.text = element_text(colour = "black", size = 10),
+                            axis.title = element_text(colour = "black", size = 12))
+p_cytotoxic <- ggplot(df_cytotoxic_auc_melt, aes(x=variable, y=value)) +
+                      geom_boxplot(fill="#786397") +
+                      theme_bw() +
+                      ggtitle("Antitumor or Cytotoxic") +
+                      xlab("")+
+                      ylab("AUC of 10-fold cross-validation")+
+                      theme(plot.title = element_text(hjust = 0.5),
+                            axis.text = element_text(colour = "black", size = 10),
+                            axis.title = element_text(colour = "black", size = 12))
+auc_figure <- ggarrange(p_antibacterial, p_antifungal, p_cytotoxic,
+                        labels = c("A", "B", "C"),
+                        ncol = 3, nrow = 1)
+ggsave(filename = "AUC_of_10-folds_cross_validation.pdf",plot = auc_figure, useDingbats = FALSE, width = 12,height = 5)
+
+
+# plot ROC curves (aggregated performances of 10-fold CVs)
+roc_antibacterial <- generateThreshVsPerfData(bench_antibacterial, measures = list(fpr, tpr, mmce))
+roc_antifungal <- generateThreshVsPerfData(bench_antifungal, measures = list(fpr, tpr, mmce))
+roc_cytotoxic <- generateThreshVsPerfData(bench_cytotoxic, measures = list(fpr, tpr, mmce))
+
+p_roc_antibacterial <- ggplot(roc_antibacterial$data, aes(x=fpr, y=tpr, color = learner)) + 
+                        geom_line(size=1)+
+                        geom_abline(intercept = 0, slope = 1, size=1)+
+                        scale_x_continuous(expand = c(0, 0)) + scale_y_continuous(expand = c(0, 0))+
+                        scale_color_d3()+
+                        theme_base()+
+                        xlab("False positive rate")+
+                        ylab("True positive rate")+
+                        ggtitle("Antibacterial") +
+                        theme(plot.title = element_text(hjust = 0.5))+
+                        theme(legend.position = "bottom")
+p_roc_antifungal <- ggplot(roc_antifungal$data, aes(x=fpr, y=tpr, color = learner)) + 
+                        geom_line(size=1)+
+                        geom_abline(intercept = 0, slope = 1, size=1)+
+                        scale_x_continuous(expand = c(0, 0)) + scale_y_continuous(expand = c(0, 0))+
+                        scale_color_d3()+
+                        theme_base()+
+                        xlab("False positive rate")+
+                        ylab("True positive rate")+
+                        ggtitle("Antifungal") +
+                        theme(plot.title = element_text(hjust = 0.5))+
+                        theme(legend.position = "bottom")
+p_roc_cytotoxic <- ggplot(roc_cytotoxic$data, aes(x=fpr, y=tpr, color = learner)) + 
+                        geom_line(size=1)+
+                        geom_abline(intercept = 0, slope = 1, size=1)+
+                        scale_x_continuous(expand = c(0, 0)) + scale_y_continuous(expand = c(0, 0))+
+                        scale_color_d3()+
+                        theme_base()+
+                        xlab("False positive rate")+
+                        ylab("True positive rate")+
+                        ggtitle("Antitumor or Cytotoxic") +
+                        theme(plot.title = element_text(hjust = 0.5))+
+                        theme(legend.position = "bottom")
+roc_figure <- ggarrange(p_roc_antibacterial, p_roc_antifungal, p_roc_cytotoxic,
+                        ncol = 3, nrow = 1,
+                        common.legend = TRUE, legend = "bottom")
+ggsave(filename = "ROC_of_10-folds_cross_validation.pdf",plot = roc_figure, useDingbats = FALSE, width = 13,height = 5)
+```
+
+
+# predict chemical activity of LAB
+```{r}
+##############################################
+# train final model
+##############################################
+# tune for random forest
+set.seed(123, "L'Ecuyer")
+parallelStartSocket(cpus = detectCores())
+rfTuning_antibacterial <- tuneParams("classif.randomForest", task = antibacterialTask,
+                                               resampling = kFold10,
+                                               par.set = forestParamSpace,
+                                               control = randSearch)
+rfTuning_antifungal <- tuneParams("classif.randomForest", task = antifungalTask,
+                                               resampling = kFold10,
+                                               par.set = forestParamSpace,
+                                               control = randSearch)
+rfTuning_cytotoxic <- tuneParams("classif.randomForest", task = anticytotoxicTask,
+                                               resampling = kFold10,
+                                               par.set = forestParamSpace,
+                                               control = randSearch)
+parallelStop()
+# train the final model
+tunedRF_antibacterial <- setHyperPars(makeLearner("classif.randomForest"), par.vals = rfTuning_antibacterial$x)
+tunedRF_antifungal <- setHyperPars(makeLearner("classif.randomForest"), par.vals = rfTuning_antifungal$x)
+tunedRF_cytotoxic <- setHyperPars(makeLearner("classif.randomForest"), par.vals = rfTuning_cytotoxic$x)
+tunedRFModel_antibacterial <- train(tunedRF_antibacterial, antibacterialTask)
+tunedRFModel_antifungal <- train(tunedRF_antifungal, antifungalTask)
+tunedRFModel_cytotoxic <- train(tunedRF_cytotoxic, anticytotoxicTask)
+
+save(tunedRFModel_antibacterial, file = "tunedRFModel_antibacterial.RData")
+save(tunedRFModel_antifungal, file = "tunedRFModel_antifungal.RData")
+save(tunedRFModel_cytotoxic, file = "tunedRFModel_cytotoxic.RData")
+
+##############################################
+# predict activities for all LAB BGCs
+##############################################
+df_lab_domain <- read.delim("../03.BGC_family/table_31977__hmm_presence_matrix.tsv", check.names = FALSE)
+names(df_lab_domain) <- gsub(" ",".",names(df_lab_domain))
+# retain the BGC features used for training 
+df_lab_domain_f <- df_lab_domain[, c("bgc_id", domain_names_alter$raw)]
+df_lab_domain_f$bgc_id <- paste("bgc", df_lab_domain_f$bgc_id, sep = "")
+rownames(df_lab_domain_f) <- df_lab_domain_f$bgc_id
+df_lab_domain_f <- df_lab_domain_f %>% select(-bgc_id)
+identical(names(df_lab_domain_f), domain_names_alter$raw)
+names(df_lab_domain_f) <- domain_names_alter$alter
+
+df_lab_domain_f_tb <- as_tibble(df_lab_domain_f)
+df_lab_domain_f_tb <- mutate_all(df_lab_domain_f_tb, factor)
+
+pred.antibacterial <- predict(tunedRFModel_antibacterial, newdata = df_lab_domain_f_tb)
+pred.antifungal <- predict(tunedRFModel_antifungal, newdata = df_lab_domain_f_tb)
+pred.cytotoxic <- predict(tunedRFModel_cytotoxic, newdata = df_lab_domain_f_tb)
+
+lab_activity <- data.frame(bgc_id=rownames(df_lab_domain_f),
+                           antibacterial=as.numeric(as.character(getPredictionResponse(pred.antibacterial))),
+                           antifungal=as.numeric(as.character(getPredictionResponse(pred.antifungal))),
+                           cytotoxic=as.numeric(as.character(getPredictionResponse(pred.cytotoxic))),
+                           stringsAsFactors = FALSE)
+lab_activity$combined_activity <- NA
+for (i in 1:nrow(lab_activity)){
+  lab_activity$combined_activity [i] <- paste(names(lab_activity)[2:4][lab_activity[i,2:4]==1],collapse = "_AND_")
+}
+lab_activity$combined_activity[lab_activity$combined_activity==""] <- "unknown"
+write.table(lab_activity, file = "predicted_compound_activity.tsv", row.names = FALSE, quote = FALSE)
+```
+
+
+# statistics for compound activity
+```{r}
+df_bgc <- read.delim2("../03.BGC_family/All_130051_BGCs_family_add_0.8_deduplication.tsv")
+#lab_activity <- read.delim2("predicted_compound_activity.tsv", sep = " ")
+df_bgc_activity <- merge(df_bgc, lab_activity, by="bgc_id", all.x = TRUE)
+
+##############################################
+# overall activities
+##############################################
+# regroup the BGC classes into five classes
+# For PKS, containing 25224 T3PKS vs. 54 other PKS, thus cluster 54 other PKS into "Others"
+# For PKS/NRPS Hybrids, number is 17, thus being clustered into "Others" as well
+df_bgc_activity$BGC_Class_re <- NA
+for (i in 1:nrow(df_bgc_activity)){
+  if (df_bgc_activity$BGC_Class[i]=="NRPS"){df_bgc_activity$BGC_Class_re[i] <- "NRPS"}
+  else if (df_bgc_activity$BGC_Class[i]=="Others"){df_bgc_activity$BGC_Class_re[i] <- "Others"}
+  else if (df_bgc_activity$BGC_Class[i]=="RiPPs"){df_bgc_activity$BGC_Class_re[i] <- "RiPPs"}
+  else if (df_bgc_activity$BGC_Class[i]=="Terpene"){df_bgc_activity$BGC_Class_re[i] <- "Terpene"}
+  else if (df_bgc_activity$BGC_Class[i]=="PKS I"){df_bgc_activity$BGC_Class_re[i] <- "Others"}
+  else if (df_bgc_activity$BGC_Class[i]=="PKS/NRPS Hybrids"){df_bgc_activity$BGC_Class_re[i] <- "Others"}
+  else if (df_bgc_activity$BGC_Class[i]=="PKS other"){
+    if (df_bgc_activity$Type[i]=="T3PKS"){df_bgc_activity$BGC_Class_re[i] <- "T3PKS"}
+    else {df_bgc_activity$BGC_Class_re[i] <- "Others"}}
+}
+
+# plot chord diagram
+df_chord <- table(df_bgc_activity$BGC_Class_re, df_bgc_activity$combined_activity) %>% as.matrix()
+# Note as only one BGC was solely assigneed to antifungal, antifugal was exclude for ploting
+df_chord <- df_chord[, colnames(df_chord)!="antifungal"]
+df_cor <- data.frame(from=rep(rownames(df_chord), times=ncol(df_chord)),
+                     to=rep(colnames(df_chord), each=nrow(df_chord)),
+                     value=as.vector(df_chord),
+                     stringsAsFactors = FALSE)
+
+# scale the BGC counts with log10 for better vasulization
+df_cor_log <- log10(df_chord+1)
+pdf(file="figure_3B_distribution_of_predicted_activity.pdf", width = 6, height = 6)
+orders <- c("RiPPs","T3PKS","NRPS","Terpene","Others","unknown","antibacterial_AND_cytotoxic","antibacterial_AND_antifungal","cytotoxic","antibacterial")
+grid.col = c(RiPPs = "#d93621", T3PKS = "#1e4586", NRPS = "#64b350", Terpene = "#8a609c", Others = "#f2b296",
+             antibacterial = "grey", cytotoxic = "grey",
+             antibacterial_AND_antifungal = "grey",
+             antibacterial_AND_cytotoxic = "grey",
+             unknown = "grey")
+grid.col2 = c(RiPPs = "grey", T3PKS = "grey", NRPS = "grey", Terpene = "grey", Others = "grey",
+             antibacterial = "#d93621", cytotoxic = "#1e4586",
+             antibacterial_AND_antifungal = "#64b350",
+             antibacterial_AND_cytotoxic = "#8a609c",
+             unknown = "#f2b296")
+## adjust gap between elements
+circos.par(gap.after=c(rep(2,nrow(df_cor_log)-1),8,rep(2,ncol(df_cor_log)-1),8),start.degree=95, clock.wise=FALSE)
+chordDiagram(t(df_chord), order = orders, grid.col = grid.col2, transparency = 0.2, scale = TRUE)
+circos.clear()
+circos.par(gap.after=c(rep(2,nrow(df_cor_log)-1),8,rep(2,ncol(df_cor_log)-1),8),start.degree=95, clock.wise=FALSE)
+chordDiagram(t(df_chord), order = orders, grid.col = grid.col2, transparency = 0.2)
+circos.clear()
+circos.par(gap.after=c(rep(2,nrow(df_cor_log)-1),8,rep(2,ncol(df_cor_log)-1),8),start.degree=95, clock.wise=FALSE)
+chordDiagram(t(df_chord_log), order = orders, grid.col = grid.col2, transparency = 0.2)
+circos.clear()
+dev.off()
+
+```
+
+
+# distribution of compound activity at genus level
+```{r}
+df_genus_func <- table(df_bgc_activity$combined_activity, df_bgc_activity$genus) %>% as.data.frame.matrix() %>% t() %>% as.data.frame()
+df_genus_func$genus <- rownames(df_genus_func)
+
+genus_genome_no <- table(as.data.frame(distinct(df_bgc_activity[!is.na(df_bgc_activity$combined_activity),c("Genome","genus")]))$genus) %>% as.data.frame()
+names(genus_genome_no) <- c("genus","genome_number")
+genus_bgc_no <- table(df_bgc_activity[!is.na(df_bgc_activity$combined_activity),]$genus) %>% as.data.frame()
+names(genus_bgc_no) <- c("genus","bgc_number")
+genus_bgc_genome_no <- merge(genus_genome_no, genus_bgc_no, by="genus", all.x = TRUE)
+genus_bgc_genome_no$label <- paste(genus_bgc_genome_no$genus, " (", genus_bgc_genome_no$genome_number,", ", genus_bgc_genome_no$bgc_number, ")", sep = "")
+
+df_genus_func_m <- merge(df_genus_func, genus_bgc_genome_no, by="genus", all.x = TRUE)
+df_genus_func_m <- df_genus_func_m[!is.na(df_genus_func_m$genome_number),]
+df_genus_func_m2 <- merge(df_genus_func_m, as.data.frame(distinct(df_bgc_activity[,c("genus","family")])), by="genus", all.x = TRUE)
+df_genus_func_m2 <- df_genus_func_m2[order(df_genus_func_m2$family),]
+df_genus_func_m2$label <- factor(df_genus_func_m2$label, levels = rev(df_genus_func_m2$label))
+df_genus_func_m2_melt <- reshape2::melt(df_genus_func_m2[,c(2:7,10)], id="label")
+df_genus_func_m2_melt$variable <- factor(df_genus_func_m2_melt$variable,
+                                         c("antibacterial","antifungal", "cytotoxic", "antibacterial_AND_antifungal","antibacterial_AND_cytotoxic","unknown"))
+p <- ggplot(df_genus_func_m2_melt, aes(fill=variable, y=value, x=label)) + 
+      geom_bar(position="fill", stat="identity")+
+      coord_flip()+
+      theme_bw()+
+      scale_fill_manual(values = c("#d93621","#8c564c","#1e4586","#64b350","#8a609c","#f2b296"))+
+      #scale_fill_d3() +
+      ylab("Proportion")+
+      xlab("")+
+      theme(axis.text = element_text(colour = "black", size = 14))
+ggsave(filename = "Proportion_of_BGC_function_in_genus_self_trained.pdf",plot = p, useDingbats = FALSE, width = 10,height = 12)
+
+```
+
+
+# distribution of compound activity at species level
+```{r}
+##############################################
+# antifungal
+##############################################
+df_antifungal_species <- table(df_bgc_activity[df_bgc_activity$antifungal==1,]$species) %>% as.data.frame()
+names(df_antifungal_species) <- c("target", "value")
+df_antifungal_species$source <- "antifungal"
+nodes_antifungal_species <- data.frame(name=c(as.character(df_antifungal_species$source), as.character(df_antifungal_species$target)) %>% unique())
+df_antifungal_species$IDsource <- match(df_antifungal_species$source, nodes_antifungal_species$name)-1 
+df_antifungal_species$IDtarget <- match(df_antifungal_species$target, nodes_antifungal_species$name)-1
+ColourScal_antifungal_species  <- 'd3.scaleOrdinal() .range(["#64b350","#3C3C3C","#3C3C3C","#3C3C3C"])'
+sn_antifungal <- sankeyNetwork(Links = df_antifungal_species, Nodes = nodes_antifungal_species,
+                     Source = "IDsource", Target = "IDtarget",
+                     Value = "value", NodeID = "name", 
+                     sinksRight=FALSE, colourScale=ColourScal_antifungal_species, 
+                     height=200, width=2000,
+                     nodeWidth=40, fontSize=13, nodePadding=20,
+                     iterations = 0)
+saveNetwork(sn_antifungal, "sn_antifungal.html")
+webshot("sn_antifungal.html","sn_antifungal.pdf", vwidth = 1000, vheight = 900)
+
+
+##############################################
+# cytotoxic
+##############################################
+df_cytotoxic_species <- table(df_bgc_activity[df_bgc_activity$cytotoxic==1,]$species) %>% as.data.frame()
+names(df_cytotoxic_species) <- c("target", "value")
+df_cytotoxic_species_f <- df_cytotoxic_species %>% filter(value>100)
+df_cytotoxic_species_f <- rbind(df_cytotoxic_species_f, data.frame(target="others",
+                                                              value=sum(df_cytotoxic_species$value)-sum(df_cytotoxic_species_f$value)))
+df_cytotoxic_species_f$source <- "cytotoxic"
+nodes_cytotoxic_species <- data.frame(name=c(as.character(df_cytotoxic_species_f$source), as.character(df_cytotoxic_species_f$target)) %>% unique())
+
+df_cytotoxic_species_f$IDsource <- match(df_cytotoxic_species_f$source, nodes_cytotoxic_species$name)-1 
+df_cytotoxic_species_f$IDtarget <- match(df_cytotoxic_species_f$target, nodes_cytotoxic_species$name)-1
+ColourScal_cytotoxic_species  <- 'd3.scaleOrdinal() .range(["#1e4586","#3C3C3C","#3C3C3C","#3C3C3C", "#3C3C3C","#3C3C3C","#3C3C3C","#3C3C3C",])'
+
+pdf(file="figure_3C_distribution_of_antifugal_cytotoxic.pdf", width = 6, height = 6)
+sn_cytotoxic <- sankeyNetwork(Links = df_cytotoxic_species_f, Nodes = nodes_cytotoxic_species,
+                     Source = "IDsource", Target = "IDtarget",
+                     Value = "value", NodeID = "name", 
+                     sinksRight=FALSE, colourScale=ColourScal_cytotoxic_species, 
+                     height=800, width=2000,
+                     nodeWidth=40, fontSize=13, nodePadding=20,
+                     iterations = 0)
+saveNetwork(sn_cytotoxic, "sn_cytotoxic.html")
+webshot("sn_cytotoxic.html","sn_cytotoxic.pdf", vwidth = 1000, vheight = 900)
+
+df_antifungal_species
+df_cytotoxic_species_f
+
+##############################################
+# add BGC classes
+##############################################
+# antifungal
+df_antifungal_species <- table(df_bgc_activity[df_bgc_activity$antifungal==1,]$species) %>% as.data.frame()
+df_antifungal_species$Var2 <- "antifugal"
+names(df_antifungal_species) <- c("target", "value", "source")
+df_antifungal_species_re <- table(df_bgc_activity[df_bgc_activity$antifungal==1,]$species, df_bgc_activity[df_bgc_activity$antifungal==1,]$BGC_Class_re) %>% as.data.frame()
+names(df_antifungal_species_re) <- c("source","target", "value")
+df_antifungal_species_m <- rbind(df_antifungal_species , df_antifungal_species_re)
+nodes_antifungal_species_m <- data.frame(name=c(as.character(df_antifungal_species_m$source), as.character(df_antifungal_species_m$target)) %>% unique())
+df_antifungal_species_m$IDsource <- match(df_antifungal_species_m$source, nodes_antifungal_species_m$name)-1 
+df_antifungal_species_m$IDtarget <- match(df_antifungal_species_m$target, nodes_antifungal_species_m$name)-1
+df_antifungal_species_m <- df_antifungal_species_m %>% filter(value!=0)
+ColourScal_antifungal_species_m  <- 'd3.scaleOrdinal() .range(["#64b350","#3C3C3C","#3C3C3C","#3C3C3C","#64b350","#f2b296"])'
+sn_antifungal_m <- sankeyNetwork(Links = df_antifungal_species_m, Nodes = nodes_antifungal_species_m,
+                     Source = "IDsource", Target = "IDtarget",
+                     Value = "value", NodeID = "name", 
+                     sinksRight=FALSE, colourScale=ColourScal_antifungal_species_m, 
+                     height=400, width=2000,
+                     nodeWidth=40, fontSize=13, nodePadding=20)
+saveNetwork(sn_antifungal_m, "sn_antifungal_m.html")
+webshot("sn_antifungal_m.html","sn_antifungal_BGC_class.pdf", vwidth = 1000, vheight = 900)
+
+# cytotoxic
+df_cytotoxic_species <- table(df_bgc_activity[df_bgc_activity$cytotoxic==1,]$species) %>% as.data.frame(stringsAsFactors=FALSE)
+df_cytotoxic_species_f <- df_cytotoxic_species %>% filter(Freq>100)
+df_cytotoxic_species_f <- rbind(df_cytotoxic_species_f, data.frame(Var1="others_species",
+                                                              Freq=sum(df_cytotoxic_species$Freq)-sum(df_cytotoxic_species_f$Freq),
+                                                              stringsAsFactors=FALSE))
+df_cytotoxic_species_f$Var2 <- "cytotoxic"
+names(df_cytotoxic_species_f) <- c("target", "value", "source")
+
+df_cytotoxic_species_re <- table(df_bgc_activity[df_bgc_activity$cytotoxic==1,]$species, df_bgc_activity[df_bgc_activity$cytotoxic==1,]$BGC_Class_re) %>% as.data.frame(stringsAsFactors=FALSE)
+df_cytotoxic_species_re <- df_cytotoxic_species_re %>% filter(Freq != 0)
+for (i in 1:nrow(df_cytotoxic_species_re)){
+  df_cytotoxic_species_re$Var1[i] <- ifelse(df_cytotoxic_species_re$Var1[i] %in% df_cytotoxic_species_f$target,
+                                            df_cytotoxic_species_re$Var1[i],
+                                            "others_species")
+}
+df_cytotoxic_species_re_sum <- aggregate(Freq ~ Var1 + Var2, data = df_cytotoxic_species_re, sum)
+names(df_cytotoxic_species_re_sum) <- c("source","target", "value")
+df_cytotoxic_species_m <- rbind(df_cytotoxic_species_f, df_cytotoxic_species_re_sum)
+nodes_cytotoxic_species_m <- data.frame(name=c(as.character(df_cytotoxic_species_m$source), as.character(df_cytotoxic_species_m$target)) %>% unique())
+
+indx <- factor(nodes_cytotoxic_species_m$name, levels = c("cytotoxic","s__Streptococcus dysgalactiae","s__Streptococcus equi","s__Streptococcus pyogenes",
+                                                          "s__Enterococcus_B faecium","s__Enterococcus_B lactis","s__Lactiplantibacillus plantarum","others_species",
+                                                          "RiPPs","NRPS","T3PKS","Terpene","Others"))
+nodes_cytotoxic_species_m <- data.frame(name=nodes_cytotoxic_species_m[order(indx),], stringsAsFactors = FALSE)
+
+df_cytotoxic_species_m$IDsource <- match(df_cytotoxic_species_m$source, nodes_cytotoxic_species_m$name)-1 
+df_cytotoxic_species_m$IDtarget <- match(df_cytotoxic_species_m$target, nodes_cytotoxic_species_m$name)-1
+df_cytotoxic_species_m <- df_cytotoxic_species_m %>% filter(value!=0)
+df_cytotoxic_species_m$source <- factor(df_cytotoxic_species_m$source, levels = c("cytotoxic","s__Streptococcus dysgalactiae","s__Streptococcus equi","s__Streptococcus pyogenes",
+                                                          "s__Enterococcus_B faecium","s__Enterococcus_B lactis","s__Lactiplantibacillus plantarum","others_species"))
+df_cytotoxic_species_m$target <- factor(df_cytotoxic_species_m$target, levels = c("s__Streptococcus dysgalactiae","s__Streptococcus equi","s__Streptococcus pyogenes",
+                                                          "s__Enterococcus_B faecium","s__Enterococcus_B lactis","s__Lactiplantibacillus plantarum","others_species",
+                                                          "RiPPs","NRPS","T3PKS","Terpene","Others"))
+ColourScal_cytotoxic_species_m  <- 'd3.scaleOrdinal() .range(["#64b350","#3C3C3C","#3C3C3C","#3C3C3C","#3C3C3C","#3C3C3C","#3C3C3C","#3C3C3C","#d93621","#64b350","#1e4586","#8a609c","#f2b296"])'
+
+sn_cytotoxic_m <- sankeyNetwork(Links = df_cytotoxic_species_m, Nodes = nodes_cytotoxic_species_m,
+                     Source = "IDsource", Target = "IDtarget",
+                     Value = "value", NodeID = "name", 
+                     sinksRight=FALSE, colourScale=ColourScal_cytotoxic_species_m, 
+                     height=800, width=2000,
+                     nodeWidth=40, fontSize=13, nodePadding=20,
+                     iterations = 0)
+saveNetwork(sn_cytotoxic_m, "sn_cytotoxic_m.html")
+webshot("sn_cytotoxic_m.html","sn_cytotoxic_BGC_class.pdf", vwidth = 1000, vheight = 900)
+
+```
